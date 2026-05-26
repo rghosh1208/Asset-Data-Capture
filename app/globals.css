@@ -555,6 +555,29 @@ input[type="file"] { display: none; }
   color: var(--ucsf-navy);
   font-weight: 600;
 }
+.tech-input {
+  width: 100%;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  min-height: 48px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.tech-input::placeholder {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.tech-input:focus {
+  outline: none;
+  border-color: var(--ucsf-teal);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
 
 /* ---- Detail page ---- */
 .meta-list {
