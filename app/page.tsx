@@ -274,19 +274,13 @@ export default function CapturePage() {
         <>
           <header className="topbar" role="banner">
             <div className="brand">
-              <img
-                src="/ucsf-logo.png"
-                alt="UCSF"
-                className="brand-logo"
-                width={56}
-                height={28}
-              />
-              <div className="brand-divider" aria-hidden="true" />
-              <div className="brand-text">
-                <span className="t1">Asset Capture</span>
-                <span className="t2">BOSC · Facilities</span>
-              </div>
-            </div>
+  <span className="brand-wordmark" aria-label="UCSF">UCSF</span>
+  <div className="brand-divider" aria-hidden="true" />
+  <div className="brand-text">
+    <span className="t1">Maximo Asset Data Capture</span>
+    <span className="t2">BOSC · Facilities</span>
+  </div>
+</div>
             <button
               className="tech-chip"
               onClick={() => setTechModal(true)}
