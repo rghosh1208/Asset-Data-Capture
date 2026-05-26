@@ -114,13 +114,14 @@ button, a { font-family: inherit; }
 .brand { display: flex; align-items: center; gap: 12px; }
 
 /* UCSF logo in top bar — knockout white on navy */
-.brand-logo {
-  height: 36px;
-  width: 72px;          /* explicit width so full "UCSF" shows */
-  object-fit: contain;
-  object-position: left center;
-  filter: brightness(0) invert(1);
+.brand-wordmark {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #ffffff;
+  line-height: 1;
   flex-shrink: 0;
+  padding: 2px 0;
 }
 .brand-divider {
   width: 1px;
