@@ -1,10 +1,3 @@
-/* =====================================================================
-   BOSC Asset Capture — UCSF brand styling
-   - Palette: UCSF Identity Guidelines (identity.ucsf.edu)
-   - Min font: 15px throughout
-   - Contrast: WCAG AA (4.5:1 normal, 3:1 large)
-   ===================================================================== */
-
 :root {
   /* ---- UCSF brand palette (digital colors, AA-compliant) ---- */
   --ucsf-navy:    #052049;  /* primary brand */
