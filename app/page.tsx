@@ -324,16 +324,21 @@ export default function CapturePage() {
             </div>
 
             {packets.length === 0 ? (
-              <div className="empty" role="status">
-                <div className="empty-icon" aria-hidden="true">
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                    <circle cx="12" cy="13" r="4" />
-                  </svg>
-                </div>
-                <h3>Ready to capture</h3>
-                <p>Walk up to an asset, tap below,<br />shoot the tag, then the nameplates.</p>
-              </div>
+              <button
+  type="button"
+  className="empty empty-clickable"
+  onClick={startNewPacket}
+  aria-label="Start capturing a new asset"
+>
+  <div className="empty-icon" aria-hidden="true">
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
+    </svg>
+  </div>
+  <h3>Tap to capture your first asset</h3>
+  <p>Shoot the UCSF tag, then any nameplates.<br />Save and move to the next one.</p>
+</button>
             ) : (
               <ul style={{ listStyle: 'none', padding: 0, margin: 0 }} aria-label="Captured packets">
                 {packets.map((p) => (
