@@ -115,10 +115,10 @@ button, a { font-family: inherit; }
 
 /* UCSF logo in top bar — knockout white on navy */
 .brand-logo {
-  height: 32px;
-  width: auto;
+  height: 36px;
+  width: 72px;          /* explicit width so full "UCSF" shows */
   object-fit: contain;
-  /* Logo PNG is teal on transparent. Inverting to white for AAA contrast on navy. */
+  object-position: left center;
   filter: brightness(0) invert(1);
   flex-shrink: 0;
 }
