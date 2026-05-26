@@ -255,14 +255,42 @@ button, a { font-family: inherit; }
 .status-pill.failed  { background: var(--danger-bg);  color: var(--danger-text);  border-color: var(--danger-border); }
 
 /* ---- Empty state ---- */
-.empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+/* ---- Empty state (clickable) ---- */
+.empty {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--text-muted);
+}
+.empty-clickable {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+.empty-clickable:hover {
+  border-color: var(--ucsf-teal);
+  background: var(--accent-bg);
+}
+.empty-clickable:active {
+  transform: scale(0.995);
+}
 .empty-icon {
-  width: 64px; height: 64px; border-radius: 50%;
+  width: 72px; height: 72px; border-radius: 50%;
   background: var(--accent-bg);
   border: 1px solid var(--accent-border);
   margin: 0 auto 16px;
   display: grid; place-items: center;
   color: var(--ucsf-teal-2);
+  transition: transform 0.15s, background 0.15s, color 0.15s;
+}
+.empty-clickable:hover .empty-icon {
+  background: var(--ucsf-teal);
+  color: #ffffff;
+  transform: scale(1.05);
 }
 .empty h3 {
   color: var(--text);
@@ -270,7 +298,12 @@ button, a { font-family: inherit; }
   font-weight: 600;
   font-size: var(--fs-lg);
 }
-.empty p { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--text-muted); }
+.empty p {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
 
 /* ---- Action bar ---- */
 .action-bar {
