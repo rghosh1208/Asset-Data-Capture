@@ -558,31 +558,46 @@ export default function CapturePage() {
 
       {/* ====== TECH MODAL ====== */}
       <div
-        className={`modal-backdrop ${techModal ? 'active' : ''}`}
-        onClick={(e) => { if (e.target === e.currentTarget) setTechModal(false); }}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="tech-modal-title"
-        aria-hidden={!techModal}
-      >
-        <div className="modal">
-          <h3 id="tech-modal-title">Who&apos;s capturing?</h3>
-          <p>Tagged on every packet you save this session.</p>
-          {techs.map((t) => (
-            <button
-              key={t}
-              className={`tech-option ${tech === t ? 'selected' : ''}`}
-              onClick={() => selectTech(t)}
-              aria-pressed={tech === t}
-            >
-              {t}
-            </button>
-          ))}
-          <button className="btn btn-ghost" style={{ width: '100%', marginTop: 6 }} onClick={() => setTechModal(false)}>
-            Cancel
-          </button>
-        </div>
-      </div>
+  className={`modal-backdrop ${techModal ? 'active' : ''}`}
+  onClick={(e) => { if (e.target === e.currentTarget) setTechModal(false); }}
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="tech-modal-title"
+  aria-hidden={!techModal}
+>
+  <div className="modal">
+    <h3 id="tech-modal-title">Who&apos;s capturing?</h3>
+    <p>We&apos;ll remember this on your device so you don&apos;t have to type it again.</p>
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const input = (e.currentTarget.elements.namedItem('techName') as HTMLInputElement);
+        const value = input.value.trim();
+        if (value.length > 0) selectTech(value);
+      }}
+    >
+      <label htmlFor="tech-name-input" className="sr-only">Your name</label>
+      <input
+        id="tech-name-input"
+        name="techName"
+        type="text"
+        className="tech-input"
+        defaultValue={tech ?? ''}
+        placeholder="First Last (e.g. Anthony Lopez)"
+        autoComplete="name"
+        autoFocus
+        required
+        maxLength={60}
+      />
+      <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: 12 }}>
+        Save name
+      </button>
+    </form>
+    <button className="btn btn-ghost" style={{ width: '100%', marginTop: 8 }} onClick={() => setTechModal(false)}>
+      Cancel
+    </button>
+  </div>
+</div>
 
       {/* ====== TOAST ====== */}
       <div className={`toast ${toast ? 'show' : ''}`} role="status" aria-live="polite">
