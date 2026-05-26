@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getTechs } from '@/lib/techs';
 import { processPhoto } from '@/lib/photo';
 import {
   addPhoto,
@@ -55,7 +54,6 @@ export default function CapturePage() {
 
   const [detail, setDetail] = useState<{ packet: LocalPacket; photos: Array<LocalPhoto & { url: string }> } | null>(null);
 
-  const techs = useMemo(() => getTechs(), []);
 
   useEffect(() => {
     (async () => {
