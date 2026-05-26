@@ -6,7 +6,6 @@ import { processPhoto } from '@/lib/photo';
 import {
   addPhoto,
   deletePacketWithPhotos,
-  deletePhoto,
   getAllPackets,
   getDeviceId,
   getPhotosForPacket,
@@ -27,7 +26,7 @@ interface DraftPhoto {
   id: string;
   type: PhotoType;
   blob: Blob;
-  url: string;       // object URL for <img>
+  url: string;
   width: number;
   height: number;
   name: string;
@@ -47,21 +46,17 @@ export default function CapturePage() {
   const [packets, setPackets] = useState<Array<LocalPacket & { tagThumbUrl?: string; photoCount: number }>>([]);
   const [stats, setStats] = useState({ packets: 0, photos: 0, pending: 0 });
   const [online, setOnline] = useState(true);
-  const [syncStatus, setSyncStatus] = useState<string>('—');
   const [toast, setToast] = useState<string | null>(null);
 
-  // Capture state
   const [draft, setDraft] = useState<Draft | null>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
   const plateInputRef = useRef<HTMLInputElement>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
 
-  // Detail view
   const [detail, setDetail] = useState<{ packet: LocalPacket; photos: Array<LocalPhoto & { url: string }> } | null>(null);
 
   const techs = useMemo(() => getTechs(), []);
 
-  // ---- Init: load tech, online state, auto-sync, packets ----
   useEffect(() => {
     (async () => {
       const t = await getSetting<string>('tech');
@@ -78,8 +73,8 @@ export default function CapturePage() {
       });
     })();
 
-    const up = () => { setOnline(true); setSyncStatus('Online'); };
-    const down = () => { setOnline(false); setSyncStatus('Offline — will sync when reconnected'); };
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
     window.addEventListener('online', up);
     window.addEventListener('offline', down);
     return () => {
@@ -88,7 +83,6 @@ export default function CapturePage() {
     };
   }, []);
 
-  // ---- Refresh home list ----
   const refreshPackets = useCallback(async () => {
     const all = await getAllPackets();
     const enriched: Array<LocalPacket & { tagThumbUrl?: string; photoCount: number }> = [];
@@ -111,14 +105,12 @@ export default function CapturePage() {
     });
   }, []);
 
-  // ---- Tech selection ----
   async function selectTech(name: string) {
     setTech(name);
     await setSetting('tech', name);
     setTechModal(false);
   }
 
-  // ---- Start a new packet ----
   async function startNewPacket() {
     if (!tech) {
       setTechModal(true);
@@ -138,7 +130,6 @@ export default function CapturePage() {
     setView('home');
   }
 
-  // ---- Photo capture ----
   async function handlePhoto(e: React.ChangeEvent<HTMLInputElement>, type: PhotoType) {
     if (!draft) return;
     const file = e.target.files?.[0];
@@ -170,28 +161,26 @@ export default function CapturePage() {
     setDraft({ ...draft, photos: next });
   }
 
-  // ---- Save packet ----
   async function savePacketLocal(thenStartNext: boolean) {
     if (!draft || !tech) return;
     const hasTag = draft.photos.some((p) => p.type === 'tag');
     if (!hasTag) return;
 
     const deviceId = await getDeviceId();
-    const lat = await tryGetLocation();
+    const loc = await tryGetLocation();
 
     const packet: LocalPacket = {
       id: draft.id,
       capturedAt: draft.capturedAt,
       techName: tech,
       deviceId,
-      lat: lat?.lat,
-      lng: lat?.lng,
+      lat: loc?.lat,
+      lng: loc?.lng,
       notes: notesRef.current?.value || '',
       status: 'pending',
     };
     await savePacket(packet);
 
-    // Persist photos.
     let order = 0;
     for (const p of draft.photos) {
       const ph: LocalPhoto = {
@@ -207,14 +196,12 @@ export default function CapturePage() {
       await addPhoto(ph);
     }
 
-    // Kick a sync attempt now if we're online.
     if (navigator.onLine) {
       syncAllPending().then(() => refreshPackets());
     }
 
     showToast(thenStartNext ? 'Saved — start the next' : 'Saved');
 
-    // Reset draft for next packet.
     draft.photos.forEach((p) => URL.revokeObjectURL(p.url));
     if (thenStartNext) {
       setDraft({ id: newPacketId(), capturedAt: Date.now(), photos: [], notes: '' });
@@ -237,7 +224,6 @@ export default function CapturePage() {
     });
   }
 
-  // ---- Detail view ----
   async function openDetail(p: LocalPacket) {
     const photos = await getPhotosForPacket(p.id);
     const withUrls = photos.map((ph) => ({ ...ph, url: URL.createObjectURL(ph.blob) }));
@@ -259,33 +245,27 @@ export default function CapturePage() {
     refreshPackets();
   }
 
-  // ---- Manual sync ----
   async function syncNow() {
     if (!online) {
       showToast('Offline — sync will run automatically');
       return;
     }
-    setSyncStatus('Uploading…');
     const r = await syncAllPending();
     await refreshPackets();
     if (r.attempted === 0) {
-      setSyncStatus('Nothing to sync');
       showToast('Nothing to sync');
     } else {
-      setSyncStatus(`Synced ${r.succeeded}/${r.attempted} · ${timeNow()}`);
-      showToast(r.failed === 0 ? 'Uploaded' : `${r.failed} failed`);
+      showToast(r.failed === 0 ? `Uploaded ${r.succeeded}` : `${r.failed} failed`);
     }
   }
 
-  // ---- Toast ----
   const toastTimer = useRef<number | null>(null);
   function showToast(msg: string) {
     setToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 2200);
+    toastTimer.current = window.setTimeout(() => setToast(null), 2400);
   }
 
-  // ---- Derived ----
   const draftHasTag = !!draft?.photos.some((p) => p.type === 'tag');
   const draftPhotoCount = draft?.photos.length ?? 0;
 
@@ -294,47 +274,58 @@ export default function CapturePage() {
       {/* ====== HOME ====== */}
       {view === 'home' && (
         <>
-          <header className="topbar">
+          <header className="topbar" role="banner">
             <div className="brand">
-              <div className="brand-mark">A</div>
+              <img
+                src="/ucsf-logo.png"
+                alt="UCSF"
+                className="brand-logo"
+                width={56}
+                height={28}
+              />
+              <div className="brand-divider" aria-hidden="true" />
               <div className="brand-text">
                 <span className="t1">Asset Capture</span>
-                <span className="t2">BOSC · Campus</span>
+                <span className="t2">BOSC · Facilities</span>
               </div>
             </div>
-            <button className="tech-chip" onClick={() => setTechModal(true)}>
-              <span className={`dot ${tech ? '' : 'off'}`} />
+            <button
+              className="tech-chip"
+              onClick={() => setTechModal(true)}
+              aria-label={tech ? `Current technician: ${tech}. Tap to change.` : 'Set technician name'}
+            >
+              <span className={`dot ${tech ? '' : 'off'}`} aria-hidden="true" />
               <span>{tech ?? 'Set tech'}</span>
             </button>
           </header>
 
-          <div className="stats">
+          <div className="stats" role="group" aria-label="Capture statistics">
             <div className="stat">
-              <div className="stat-num">{stats.packets}</div>
-              <div className="stat-label">Today</div>
+              <div className="stat-num" aria-label={`${stats.packets} captured today`}>{stats.packets}</div>
+              <div className="stat-label">Captured</div>
             </div>
             <div className="stat">
-              <div className="stat-num">{stats.photos}</div>
+              <div className="stat-num" aria-label={`${stats.photos} photos total`}>{stats.photos}</div>
               <div className="stat-label">Photos</div>
             </div>
             <div className="stat">
-              <div className="stat-num">{stats.pending}</div>
+              <div className="stat-num" aria-label={`${stats.pending} pending upload`}>{stats.pending}</div>
               <div className="stat-label">Pending</div>
             </div>
           </div>
 
-          <div className="content">
+          <main className="content" role="main">
             <div className="section-label">
-              <span>This session</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span className={`online-dot ${online ? 'up' : 'down'}`} />
+              <span>Captured packets</span>
+              <span className="online-indicator" aria-live="polite">
+                <span className={`online-dot ${online ? 'up' : 'down'}`} aria-hidden="true" />
                 <span>{online ? 'Online' : 'Offline'}</span>
               </span>
             </div>
 
             {packets.length === 0 ? (
-              <div className="empty">
-                <div className="empty-icon">
+              <div className="empty" role="status">
+                <div className="empty-icon" aria-hidden="true">
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                     <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                     <circle cx="12" cy="13" r="4" />
@@ -344,37 +335,46 @@ export default function CapturePage() {
                 <p>Walk up to an asset, tap below,<br />shoot the tag, then the nameplates.</p>
               </div>
             ) : (
-              packets.map((p) => (
-                <div key={p.id} className="packet" onClick={() => openDetail(p)}>
-                  <div className="packet-row">
-                    <div className="packet-thumb">
-                      {p.tagThumbUrl
-                        ? <img src={p.tagThumbUrl} alt="tag" />
-                        : <span className="placeholder">?</span>}
-                    </div>
-                    <div className="packet-info">
-                      <div className="packet-id unknown">Asset tag · pending OCR</div>
-                      <div className="packet-meta">
-                        <span>{p.photoCount} photo{p.photoCount === 1 ? '' : 's'}</span>
-                        <span>·</span>
-                        <span>{fmtTime(p.capturedAt)}</span>
-                        <span>·</span>
-                        <span>{p.techName.split(' ')[0]}</span>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }} aria-label="Captured packets">
+                {packets.map((p) => (
+                  <li key={p.id}>
+                    <button
+                      className="packet"
+                      onClick={() => openDetail(p)}
+                      aria-label={`Packet captured at ${fmtTime(p.capturedAt)} by ${p.techName}, ${p.photoCount} photos, status ${p.status}`}
+                      style={{ width: '100%', textAlign: 'left', font: 'inherit' }}
+                    >
+                      <div className="packet-row">
+                        <div className="packet-thumb">
+                          {p.tagThumbUrl
+                            ? <img src={p.tagThumbUrl} alt="" />
+                            : <span className="placeholder" aria-hidden="true">?</span>}
+                        </div>
+                        <div className="packet-info">
+                          <div className="packet-id unknown">Asset tag · pending OCR</div>
+                          <div className="packet-meta">
+                            <span>{p.photoCount} photo{p.photoCount === 1 ? '' : 's'}</span>
+                            <span aria-hidden="true">·</span>
+                            <span>{fmtTime(p.capturedAt)}</span>
+                            <span aria-hidden="true">·</span>
+                            <span>{p.techName.split(' ')[0]}</span>
+                          </div>
+                        </div>
+                        <span className={`status-pill ${p.status}`}>{p.status}</span>
                       </div>
-                    </div>
-                    <span className={`status-pill ${p.status}`}>{p.status}</span>
-                  </div>
-                </div>
-              ))
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
-          </div>
+          </main>
 
-          <div className="action-bar">
+          <div className="action-bar" role="region" aria-label="Actions">
             <div className="action-bar-inner">
-              <button className="btn btn-ghost" onClick={syncNow}>
+              <button className="btn btn-ghost" onClick={syncNow} aria-label="Sync pending packets to server">
                 <SyncIcon /> Sync
               </button>
-              <button className="btn btn-primary" onClick={startNewPacket}>
+              <button className="btn btn-primary" onClick={startNewPacket} aria-label="Start capturing a new asset">
                 <PlusIcon /> New Asset
               </button>
             </div>
@@ -385,12 +385,12 @@ export default function CapturePage() {
       {/* ====== CAPTURE ====== */}
       {view === 'capture' && draft && (
         <div className="capture-screen active">
-          <header className="capture-header">
-            <button className="back-btn" onClick={cancelCapture} aria-label="Back">
+          <header className="capture-header" role="banner">
+            <button className="back-btn" onClick={cancelCapture} aria-label="Cancel and return to home">
               <ChevronIcon />
             </button>
             <div className="capture-title">
-              <h2>{draftHasTag ? 'Add nameplates' : 'New Asset'}</h2>
+              <h2>{draftHasTag ? 'Add nameplates' : 'New asset'}</h2>
               <div className="sub">
                 {draftHasTag
                   ? `${draftPhotoCount} photo${draftPhotoCount > 1 ? 's' : ''} · keep going or save`
@@ -399,15 +399,21 @@ export default function CapturePage() {
             </div>
           </header>
 
-          <div className="steps">
+          <div className="steps" role="progressbar" aria-label="Capture progress" aria-valuenow={draftHasTag ? (draftPhotoCount > 1 ? 2 : 1) : 0} aria-valuemin={0} aria-valuemax={2}>
             <div className={`step-pill ${draftHasTag ? 'done' : 'active'}`} />
             <div className={`step-pill ${draftPhotoCount > 1 ? 'done' : draftHasTag ? 'active' : ''}`} />
           </div>
 
-          <div className="capture-body">
+          <main className="capture-body" role="main">
             {!draftHasTag && (
-              <div className="photo-target" onClick={() => tagInputRef.current?.click()}>
-                <div className="photo-target-icon">
+              <button
+                type="button"
+                className="photo-target"
+                onClick={() => tagInputRef.current?.click()}
+                aria-label="Photograph the UCSF asset tag"
+                style={{ width: '100%', font: 'inherit' }}
+              >
+                <div className="photo-target-icon" aria-hidden="true">
                   <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                     <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
                     <line x1="7" y1="7" x2="7.01" y2="7" />
@@ -415,7 +421,7 @@ export default function CapturePage() {
                 </div>
                 <h3>Photograph asset tag</h3>
                 <p>The UCSF tag with the Maximo asset number.<br />Get it sharp and centered.</p>
-              </div>
+              </button>
             )}
             <input
               ref={tagInputRef}
@@ -423,59 +429,72 @@ export default function CapturePage() {
               accept="image/*"
               capture="environment"
               onChange={(e) => handlePhoto(e, 'tag')}
+              aria-label="Capture asset tag photo"
             />
 
             {draftHasTag && (
               <>
-                <div className="photo-list">
+                <ul className="photo-list" style={{ listStyle: 'none', padding: 0, margin: '0 0 16px' }} aria-label="Captured photos">
                   {draft.photos.map((p, i) => (
-                    <div key={p.id} className={`photo-item ${p.type === 'tag' ? 'tag' : ''}`}>
-                      <img src={p.url} alt={p.type} />
+                    <li key={p.id} className={`photo-item ${p.type === 'tag' ? 'tag' : ''}`}>
+                      <img src={p.url} alt={p.type === 'tag' ? 'Asset tag preview' : 'Nameplate preview'} />
                       <div className="photo-item-info">
                         <div className="photo-item-type">
-                          {p.type === 'tag' ? '★ Asset Tag' : 'Nameplate'}
+                          {p.type === 'tag' ? '★ Asset tag' : 'Nameplate'}
                         </div>
                         <div className="photo-item-name">{p.name}</div>
                       </div>
-                      <button className="photo-delete" onClick={() => removePhoto(i)} aria-label="Remove">
+                      <button className="photo-delete" onClick={() => removePhoto(i)} aria-label={`Remove ${p.type === 'tag' ? 'asset tag' : 'nameplate'} photo`}>
                         <TrashIcon />
                       </button>
-                    </div>
+                    </li>
                   ))}
-                </div>
+                </ul>
 
-                <div className="photo-target compact" onClick={() => plateInputRef.current?.click()}>
-                  <div className="photo-target-icon"><PlusIcon /></div>
+                <button
+                  type="button"
+                  className="photo-target compact"
+                  onClick={() => plateInputRef.current?.click()}
+                  aria-label="Add another nameplate or sticker photo"
+                  style={{ width: '100%', font: 'inherit', textAlign: 'left' }}
+                >
+                  <div className="photo-target-icon" aria-hidden="true"><PlusIcon /></div>
                   <div>
                     <h3>Add nameplate / sticker</h3>
-                    <p>Mfr, serial, model, install date — any sticker.</p>
+                    <p>Manufacturer, serial, model, install date — any sticker.</p>
                   </div>
-                </div>
+                </button>
                 <input
                   ref={plateInputRef}
                   type="file"
                   accept="image/*"
                   capture="environment"
                   onChange={(e) => handlePhoto(e, 'nameplate')}
+                  aria-label="Capture nameplate photo"
                 />
 
                 <div className="notes-section">
-                  <label>Notes (optional)</label>
-                  <textarea ref={notesRef} placeholder="e.g. tag scuffed, located on rear panel..." />
+                  <label htmlFor="capture-notes">Notes (optional)</label>
+                  <textarea
+                    id="capture-notes"
+                    ref={notesRef}
+                    placeholder="e.g. tag scuffed, located on rear panel..."
+                  />
                 </div>
               </>
             )}
-          </div>
+          </main>
 
-          <div className="action-bar">
+          <div className="action-bar" role="region" aria-label="Actions">
             <div className="action-bar-inner">
               <button className="btn btn-danger" onClick={cancelCapture}>Discard</button>
               <button
                 className="btn btn-primary"
                 disabled={!draftHasTag}
                 onClick={() => savePacketLocal(true)}
+                aria-label={draftHasTag ? 'Save this asset and start a new one' : 'Capture asset tag first to enable save'}
               >
-                <CheckIcon /> Save & next
+                <CheckIcon /> Save &amp; next
               </button>
             </div>
           </div>
@@ -485,44 +504,50 @@ export default function CapturePage() {
       {/* ====== DETAIL ====== */}
       {view === 'detail' && detail && (
         <div className="capture-screen active">
-          <header className="capture-header">
-            <button className="back-btn" onClick={closeDetail} aria-label="Back"><ChevronIcon /></button>
+          <header className="capture-header" role="banner">
+            <button className="back-btn" onClick={closeDetail} aria-label="Back to home">
+              <ChevronIcon />
+            </button>
             <div className="capture-title">
-              <h2>Packet</h2>
-              <div className="sub">{detail.packet.id} · {fmtTime(detail.packet.capturedAt)}</div>
+              <h2>Packet detail</h2>
+              <div className="sub">{detail.packet.id.replace(/^pkt_/, '').slice(0, 16)}… · {fmtTime(detail.packet.capturedAt)}</div>
             </div>
           </header>
-          <div className="capture-body">
-            <div className="meta-list" style={{ background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '14px 16px', marginBottom: 16 }}>
+          <main className="capture-body" role="main">
+            <dl className="meta-list" style={{ margin: '0 0 16px' }}>
               <MetaRow k="Status" v={detail.packet.status} />
               <MetaRow k="Tech" v={detail.packet.techName} />
               <MetaRow k="Photos" v={String(detail.photos.length)} />
               <MetaRow k="Captured" v={new Date(detail.packet.capturedAt).toLocaleString()} />
               {detail.packet.lastError && <MetaRow k="Error" v={detail.packet.lastError} />}
-            </div>
+            </dl>
 
             <div className="section-label"><span>Photos</span></div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 16 }}>
+            <div className="photo-grid" role="list" aria-label="Captured photos">
               {detail.photos.map((p) => (
                 <img
                   key={p.id}
                   src={p.url}
-                  alt={p.type}
-                  style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}
+                  alt={p.type === 'tag' ? 'Asset tag' : 'Nameplate'}
+                  role="listitem"
                 />
               ))}
             </div>
 
             {detail.packet.notes && (
-              <div style={{ background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '14px 16px', marginBottom: 16, fontSize: 13, whiteSpace: 'pre-wrap' }}>
+              <div
+                className="meta-list"
+                style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)', whiteSpace: 'pre-wrap', color: 'var(--text-dim)' }}
+                aria-label="Capture notes"
+              >
                 {detail.packet.notes}
               </div>
             )}
 
-            <button className="btn btn-danger" style={{ width: '100%' }} onClick={deletePacketFromDetail}>
+            <button className="btn btn-danger" style={{ width: '100%', marginTop: 8 }} onClick={deletePacketFromDetail}>
               Delete from device
             </button>
-          </div>
+          </main>
         </div>
       )}
 
@@ -530,15 +555,20 @@ export default function CapturePage() {
       <div
         className={`modal-backdrop ${techModal ? 'active' : ''}`}
         onClick={(e) => { if (e.target === e.currentTarget) setTechModal(false); }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="tech-modal-title"
+        aria-hidden={!techModal}
       >
         <div className="modal">
-          <h3>Who&apos;s capturing?</h3>
+          <h3 id="tech-modal-title">Who&apos;s capturing?</h3>
           <p>Tagged on every packet you save this session.</p>
           {techs.map((t) => (
             <button
               key={t}
               className={`tech-option ${tech === t ? 'selected' : ''}`}
               onClick={() => selectTech(t)}
+              aria-pressed={tech === t}
             >
               {t}
             </button>
@@ -550,7 +580,7 @@ export default function CapturePage() {
       </div>
 
       {/* ====== TOAST ====== */}
-      <div className={`toast ${toast ? 'show' : ''}`}>
+      <div className={`toast ${toast ? 'show' : ''}`} role="status" aria-live="polite">
         <CheckIcon />
         <span>{toast}</span>
       </div>
@@ -558,13 +588,13 @@ export default function CapturePage() {
   );
 }
 
-// ---- Small components & helpers ------------------------------------
+// ---- Helpers ---------------------------------------------------------
 
 function MetaRow({ k, v }: { k: string; v: string }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
-      <span style={{ color: 'var(--text-faint)' }}>{k}</span>
-      <span style={{ fontFamily: 'IBM Plex Mono' }}>{v}</span>
+    <div className="meta-row">
+      <dt className="k">{k}</dt>
+      <dd className="v" style={{ margin: 0 }}>{v}</dd>
     </div>
   );
 }
@@ -572,15 +602,12 @@ function MetaRow({ k, v }: { k: string; v: string }) {
 function fmtTime(ms: number) {
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
-function timeNow() {
-  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
 
-// ---- Icons (inline SVG) --------------------------------------------
+// ---- Icons -----------------------------------------------------------
 
 function PlusIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <line x1="12" y1="5" x2="12" y2="19" />
       <line x1="5" y1="12" x2="19" y2="12" />
     </svg>
@@ -588,21 +615,21 @@ function PlusIcon() {
 }
 function CheckIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="20 6 9 17 4 12" />
     </svg>
   );
 }
 function ChevronIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="15 18 9 12 15 6" />
     </svg>
   );
 }
 function TrashIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="3 6 5 6 21 6" />
       <path d="M19 6l-2 14H7L5 6" />
       <path d="M10 11v6M14 11v6" />
@@ -611,7 +638,7 @@ function TrashIcon() {
 }
 function SyncIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="23 4 23 10 17 10" />
       <polyline points="1 20 1 14 7 14" />
       <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
