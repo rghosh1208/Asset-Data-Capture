@@ -24,6 +24,10 @@ export interface LocalPacket {
   deviceId: string;
   lat?: number;
   lng?: number;
+  scannedAssetNum?: string;  // decoded from the tag barcode/QR in the field
+  building?: string;         // building code, e.g. 2252
+  locationCode?: string;     // assembled UCSF code, e.g. 2252-01-1C3
+  tagSharpness?: number;     // focus metric of the tag photo (higher = sharper)
   notes: string;
   status: SyncStatus;
   lastError?: string;

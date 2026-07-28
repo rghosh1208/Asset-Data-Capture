@@ -59,6 +59,10 @@ async function syncPacket(p: LocalPacket): Promise<void> {
     device_id: p.deviceId,
     lat: p.lat ?? null,
     lng: p.lng ?? null,
+    scanned_asset_num: p.scannedAssetNum ?? null,
+    building: p.building ?? null,
+    location_code: p.locationCode ?? null,
+    tag_sharpness: p.tagSharpness ?? null,
     notes: p.notes || null,
   });
   if (pErr) throw new Error(`packet insert: ${pErr.message}`);

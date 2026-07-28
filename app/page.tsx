@@ -1,7 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { processPhoto } from '@/lib/photo';
+import { processPhoto, SHARPNESS_WARN_THRESHOLD } from '@/lib/photo';
+import {
+  captureFrame,
+  normalizeAssetNumber,
+  startTagScan,
+  type ScanHandle,
+} from '@/lib/barcode';
+import { buildLocationCode, getBuildings } from '@/lib/locations';
+import { speechSupported, startDictation, type DictationHandle } from '@/lib/speech';
 import {
   addPhoto,
   deletePacketWithPhotos,
@@ -28,13 +36,22 @@ interface DraftPhoto {
   url: string;
   width: number;
   height: number;
+  sharpness: number;
   name: string;
+}
+
+interface DraftLocation {
+  building: string; // building code
+  floor: string;
+  room: string;
 }
 
 interface Draft {
   id: string;
   capturedAt: number;
   photos: DraftPhoto[];
+  assetNum: string;      // scanned from the tag; '' until scanned
+  location: DraftLocation;
   notes: string;
 }
 
@@ -51,8 +68,24 @@ export default function CapturePage() {
   const tagInputRef = useRef<HTMLInputElement>(null);
   const plateInputRef = useRef<HTMLInputElement>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
+  const [blurWarn, setBlurWarn] = useState(false);
+
+  // Barcode scanner
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const scanHandleRef = useRef<ScanHandle | null>(null);
+  const scanBusyRef = useRef(false);
+
+  // Voice notes
+  const [dictating, setDictating] = useState(false);
+  const dictationRef = useRef<DictationHandle | null>(null);
+  const notesBaseRef = useRef('');
 
   const [detail, setDetail] = useState<{ packet: LocalPacket; photos: Array<LocalPhoto & { url: string }> } | null>(null);
+
+  const buildings = useMemo(() => getBuildings(), []);
+  const canDictate = useMemo(() => speechSupported(), []);
 
 
   useEffect(() => {
@@ -78,6 +111,8 @@ export default function CapturePage() {
     return () => {
       window.removeEventListener('online', up);
       window.removeEventListener('offline', down);
+      scanHandleRef.current?.stop();
+      dictationRef.current?.stop();
     };
   }, []);
 
@@ -109,13 +144,28 @@ export default function CapturePage() {
     setTechModal(false);
   }
 
+  // Location carries over from the last packet — consecutive assets are
+  // usually in the same room, so re-typing it every time is wasted taps.
+  async function freshLocation(): Promise<DraftLocation> {
+    const last = await getSetting<DraftLocation>('lastLocation');
+    return last ?? { building: '', floor: '', room: '' };
+  }
+
   async function startNewPacket() {
     if (!tech) {
       setTechModal(true);
       return;
     }
     const id = newPacketId();
-    setDraft({ id, capturedAt: Date.now(), photos: [], notes: '' });
+    setBlurWarn(false);
+    setDraft({
+      id,
+      capturedAt: Date.now(),
+      photos: [],
+      assetNum: '',
+      location: await freshLocation(),
+      notes: '',
+    });
     setView('capture');
   }
 
@@ -124,6 +174,8 @@ export default function CapturePage() {
       if (!confirm('Discard this asset and its photos?')) return;
       draft.photos.forEach((p) => URL.revokeObjectURL(p.url));
     }
+    stopScan();
+    stopDictation();
     setDraft(null);
     setView('home');
   }
@@ -136,6 +188,21 @@ export default function CapturePage() {
 
     try {
       const processed = await processPhoto(file);
+      addProcessedPhoto(processed, type);
+    } catch (err) {
+      showToast('Photo failed: ' + (err instanceof Error ? err.message : 'unknown'));
+    }
+  }
+
+  // Shared path for photos arriving from either the file camera or a scanned
+  // frame. Runs the blur guard on the tag shot — the one photo that absolutely
+  // must stay readable for later reconciliation.
+  function addProcessedPhoto(
+    processed: { blob: Blob; width: number; height: number; sharpness: number },
+    type: PhotoType,
+  ) {
+    setDraft((prev) => {
+      if (!prev) return prev;
       const url = URL.createObjectURL(processed.blob);
       const newPhoto: DraftPhoto = {
         id: newPhotoId(),
@@ -144,19 +211,130 @@ export default function CapturePage() {
         url,
         width: processed.width,
         height: processed.height,
-        name: type === 'tag' ? 'asset_tag.jpg' : `nameplate_${draft.photos.length}.jpg`,
+        sharpness: processed.sharpness,
+        name: type === 'tag' ? 'asset_tag.jpg' : `nameplate_${prev.photos.length}.jpg`,
       };
-      setDraft({ ...draft, photos: [...draft.photos, newPhoto] });
-    } catch (err) {
-      showToast('Photo failed: ' + (err instanceof Error ? err.message : 'unknown'));
+      return { ...prev, photos: [...prev.photos, newPhoto] };
+    });
+    if (type === 'tag') {
+      setBlurWarn(
+        processed.sharpness > 0 && processed.sharpness < SHARPNESS_WARN_THRESHOLD,
+      );
     }
   }
 
   function removePhoto(idx: number) {
     if (!draft) return;
-    URL.revokeObjectURL(draft.photos[idx].url);
+    const removed = draft.photos[idx];
+    URL.revokeObjectURL(removed.url);
     const next = draft.photos.filter((_, i) => i !== idx);
+    if (removed.type === 'tag') setBlurWarn(false);
     setDraft({ ...draft, photos: next });
+  }
+
+  function retakeTag() {
+    if (!draft) return;
+    const tag = draft.photos.find((p) => p.type === 'tag');
+    if (tag) {
+      URL.revokeObjectURL(tag.url);
+      setDraft({ ...draft, photos: draft.photos.filter((p) => p.type !== 'tag') });
+    }
+    setBlurWarn(false);
+  }
+
+  // ---- Barcode / QR scan ----
+  async function openScan() {
+    setScanError(null);
+    setScanning(true);
+    // Give React a tick to mount the <video> before we bind the stream.
+    await new Promise((r) => setTimeout(r, 0));
+    const video = videoRef.current;
+    if (!video) {
+      setScanning(false);
+      return;
+    }
+    try {
+      scanHandleRef.current = await startTagScan(
+        video,
+        (text) => onScanDecoded(text),
+        (err) => setScanError(err instanceof Error ? err.message : 'Scanner error'),
+      );
+    } catch (err) {
+      setScanError(
+        err instanceof Error ? err.message : 'Camera unavailable — use Photograph instead',
+      );
+    }
+  }
+
+  async function onScanDecoded(text: string) {
+    if (scanBusyRef.current) return; // ignore repeat reads while we finish up
+    scanBusyRef.current = true;
+    const video = videoRef.current;
+    const assetNum = normalizeAssetNumber(text);
+    try {
+      if (navigator.vibrate) navigator.vibrate(60);
+      // Grab the current frame as the tag photo, so the packet keeps proof.
+      if (video) {
+        const frame = await captureFrame(video);
+        const processed = await processPhoto(frame);
+        addProcessedPhoto(processed, 'tag');
+      }
+      setDraft((prev) => (prev ? { ...prev, assetNum } : prev));
+      showToast(`Scanned ${assetNum}`);
+    } catch (err) {
+      showToast('Scan capture failed — try Photograph');
+    } finally {
+      stopScan();
+      scanBusyRef.current = false;
+    }
+  }
+
+  function stopScan() {
+    try {
+      scanHandleRef.current?.stop();
+    } catch {
+      /* noop */
+    }
+    scanHandleRef.current = null;
+    setScanning(false);
+  }
+
+  // ---- Voice notes ----
+  function toggleDictation() {
+    if (dictating) {
+      stopDictation();
+      return;
+    }
+    notesBaseRef.current = notesRef.current?.value?.trim() ?? '';
+    const handle = startDictation(
+      (text) => {
+        if (!notesRef.current) return;
+        const base = notesBaseRef.current;
+        notesRef.current.value = base ? `${base} ${text}` : text;
+      },
+      () => setDictating(false),
+    );
+    if (!handle) {
+      showToast('Voice input unavailable on this device');
+      return;
+    }
+    dictationRef.current = handle;
+    setDictating(true);
+  }
+
+  function stopDictation() {
+    try {
+      dictationRef.current?.stop();
+    } catch {
+      /* noop */
+    }
+    dictationRef.current = null;
+    setDictating(false);
+  }
+
+  // ---- Location ----
+  function setLoc(patch: Partial<DraftLocation>) {
+    setDraft((prev) => (prev ? { ...prev, location: { ...prev.location, ...patch } } : prev));
   }
 
   async function savePacketLocal(thenStartNext: boolean) {
@@ -166,6 +344,15 @@ export default function CapturePage() {
 
     const deviceId = await getDeviceId();
     const loc = await tryGetLocation();
+    const tagPhoto = draft.photos.find((p) => p.type === 'tag');
+    const locationCode = buildLocationCode(
+      draft.location.building,
+      draft.location.floor,
+      draft.location.room,
+    );
+
+    // Remember this location so the next asset in the same room prefills.
+    await setSetting('lastLocation', draft.location);
 
     const packet: LocalPacket = {
       id: draft.id,
@@ -174,6 +361,10 @@ export default function CapturePage() {
       deviceId,
       lat: loc?.lat,
       lng: loc?.lng,
+      scannedAssetNum: draft.assetNum || undefined,
+      building: draft.location.building || undefined,
+      locationCode: locationCode || undefined,
+      tagSharpness: tagPhoto?.sharpness,
       notes: notesRef.current?.value || '',
       status: 'pending',
     };
@@ -200,9 +391,19 @@ export default function CapturePage() {
 
     showToast(thenStartNext ? 'Saved — start the next' : 'Saved');
 
+    // Reset draft for next packet — keep the location so a room-by-room sweep
+    // doesn't re-enter it each time.
     draft.photos.forEach((p) => URL.revokeObjectURL(p.url));
+    setBlurWarn(false);
     if (thenStartNext) {
-      setDraft({ id: newPacketId(), capturedAt: Date.now(), photos: [], notes: '' });
+      setDraft({
+        id: newPacketId(),
+        capturedAt: Date.now(),
+        photos: [],
+        assetNum: '',
+        location: draft.location,
+        notes: '',
+      });
       if (notesRef.current) notesRef.current.value = '';
     } else {
       setDraft(null);
@@ -338,7 +539,7 @@ export default function CapturePage() {
                     <button
                       className="packet"
                       onClick={() => openDetail(p)}
-                      aria-label={`Packet captured at ${fmtTime(p.capturedAt)} by ${p.techName}, ${p.photoCount} photos, status ${p.status}`}
+                      aria-label={`Packet ${p.scannedAssetNum ?? 'pending OCR'} captured at ${fmtTime(p.capturedAt)} by ${p.techName}, ${p.photoCount} photos, status ${p.status}`}
                       style={{ width: '100%', textAlign: 'left', font: 'inherit' }}
                     >
                       <div className="packet-row">
@@ -348,8 +549,11 @@ export default function CapturePage() {
                             : <span className="placeholder" aria-hidden="true">?</span>}
                         </div>
                         <div className="packet-info">
-                          <div className="packet-id unknown">Asset tag · pending OCR</div>
+                          <div className={`packet-id ${p.scannedAssetNum ? '' : 'unknown'}`}>
+                            {p.scannedAssetNum ? p.scannedAssetNum : 'Asset tag · pending OCR'}
+                          </div>
                           <div className="packet-meta">
+                            {p.locationCode && <><span className="mono">{p.locationCode}</span><span aria-hidden="true">·</span></>}
                             <span>{p.photoCount} photo{p.photoCount === 1 ? '' : 's'}</span>
                             <span aria-hidden="true">·</span>
                             <span>{fmtTime(p.capturedAt)}</span>
@@ -403,22 +607,24 @@ export default function CapturePage() {
 
           <main className="capture-body" role="main">
             {!draftHasTag && (
-              <button
-                type="button"
-                className="photo-target"
-                onClick={() => tagInputRef.current?.click()}
-                aria-label="Photograph the UCSF asset tag"
-                style={{ width: '100%', font: 'inherit' }}
-              >
-                <div className="photo-target-icon" aria-hidden="true">
-                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
-                    <line x1="7" y1="7" x2="7.01" y2="7" />
-                  </svg>
-                </div>
-                <h3>Photograph asset tag</h3>
-                <p>The UCSF tag with the Maximo asset number.<br />Get it sharp and centered.</p>
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="photo-target"
+                  onClick={openScan}
+                  aria-label="Scan the asset tag barcode or QR code"
+                  style={{ width: '100%', font: 'inherit' }}
+                >
+                  <div className="photo-target-icon" aria-hidden="true">
+                    <ScanIcon />
+                  </div>
+                  <h3>Scan asset tag</h3>
+                  <p>Point at the barcode or QR on the UCSF tag.<br />We&apos;ll read the asset number and keep the photo.</p>
+                </button>
+                <button type="button" className="link-btn" onClick={() => tagInputRef.current?.click()}>
+                  No barcode? Photograph the tag instead
+                </button>
+              </>
             )}
             <input
               ref={tagInputRef}
@@ -431,6 +637,34 @@ export default function CapturePage() {
 
             {draftHasTag && (
               <>
+                {draft.assetNum ? (
+                  <div className="asset-chip">
+                    <span className="asset-chip-label">Asset</span>
+                    <span className="asset-chip-num mono">{draft.assetNum}</span>
+                    <button className="asset-chip-edit" onClick={openScan} aria-label="Rescan asset tag">
+                      <ScanIcon small />
+                    </button>
+                  </div>
+                ) : (
+                  <button type="button" className="asset-chip ghost" onClick={openScan}>
+                    <ScanIcon small />
+                    <span>Scan tag barcode for exact asset #</span>
+                  </button>
+                )}
+
+                {blurWarn && (
+                  <div className="blur-warn" role="alert">
+                    <div className="blur-warn-text">
+                      <strong>Tag photo looks blurry.</strong>
+                      <span>It may be unreadable later. Retake for a sharp shot.</span>
+                    </div>
+                    <div className="blur-warn-actions">
+                      <button className="btn btn-ghost sm" onClick={() => setBlurWarn(false)}>Keep</button>
+                      <button className="btn btn-primary sm" onClick={retakeTag}>Retake</button>
+                    </div>
+                  </div>
+                )}
+
                 <ul className="photo-list" style={{ listStyle: 'none', padding: 0, margin: '0 0 16px' }} aria-label="Captured photos">
                   {draft.photos.map((p, i) => (
                     <li key={p.id} className={`photo-item ${p.type === 'tag' ? 'tag' : ''}`}>
@@ -470,8 +704,60 @@ export default function CapturePage() {
                   aria-label="Capture nameplate photo"
                 />
 
+                <div className="loc-section">
+                  <div className="loc-head">
+                    <label htmlFor="loc-building">Location</label>
+                    <span className="loc-code mono" aria-live="polite">
+                      {buildLocationCode(draft.location.building, draft.location.floor, draft.location.room) || '—'}
+                    </span>
+                  </div>
+                  <div className="loc-grid">
+                    <select
+                      id="loc-building"
+                      className="loc-input"
+                      value={draft.location.building}
+                      onChange={(e) => setLoc({ building: e.target.value })}
+                      aria-label="Building"
+                    >
+                      <option value="">Building…</option>
+                      {buildings.map((b) => (
+                        <option key={b.code} value={b.code}>
+                          {b.code} · {b.abbr}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      className="loc-input"
+                      inputMode="text"
+                      placeholder="Floor"
+                      value={draft.location.floor}
+                      onChange={(e) => setLoc({ floor: e.target.value })}
+                      aria-label="Floor"
+                    />
+                    <input
+                      className="loc-input"
+                      placeholder="Room"
+                      value={draft.location.room}
+                      onChange={(e) => setLoc({ room: e.target.value })}
+                      aria-label="Room"
+                    />
+                  </div>
+                </div>
+
                 <div className="notes-section">
-                  <label htmlFor="capture-notes">Notes (optional)</label>
+                  <div className="notes-head">
+                    <label htmlFor="capture-notes">Notes (optional)</label>
+                    {canDictate && (
+                      <button
+                        type="button"
+                        className={`mic-btn ${dictating ? 'live' : ''}`}
+                        onClick={toggleDictation}
+                        aria-label={dictating ? 'Stop dictation' : 'Dictate notes'}
+                      >
+                        <MicIcon /> {dictating ? 'Listening…' : 'Dictate'}
+                      </button>
+                    )}
+                  </div>
                   <textarea
                     id="capture-notes"
                     ref={notesRef}
@@ -513,6 +799,8 @@ export default function CapturePage() {
           <main className="capture-body" role="main">
             <dl className="meta-list" style={{ margin: '0 0 16px' }}>
               <MetaRow k="Status" v={detail.packet.status} />
+              {detail.packet.scannedAssetNum && <MetaRow k="Asset #" v={detail.packet.scannedAssetNum} />}
+              {detail.packet.locationCode && <MetaRow k="Location" v={detail.packet.locationCode} />}
               <MetaRow k="Tech" v={detail.packet.techName} />
               <MetaRow k="Photos" v={String(detail.photos.length)} />
               <MetaRow k="Captured" v={new Date(detail.packet.capturedAt).toLocaleString()} />
@@ -591,6 +879,22 @@ export default function CapturePage() {
   </div>
 </div>
 
+      {/* ====== SCANNER OVERLAY ====== */}
+      {scanning && (
+        <div className="scanner">
+          <video ref={videoRef} className="scanner-video" muted playsInline autoPlay />
+          <div className="scanner-frame" aria-hidden="true" />
+          <div className="scanner-top">
+            <button className="scanner-close" onClick={stopScan} aria-label="Close scanner">
+              <CloseIcon />
+            </button>
+          </div>
+          <div className="scanner-hint" role="status" aria-live="polite">
+            {scanError ? scanError : 'Center the barcode or QR in the box'}
+          </div>
+        </div>
+      )}
+
       {/* ====== TOAST ====== */}
       <div className={`toast ${toast ? 'show' : ''}`} role="status" aria-live="polite">
         <CheckIcon />
@@ -654,6 +958,36 @@ function SyncIcon() {
       <polyline points="23 4 23 10 17 10" />
       <polyline points="1 20 1 14 7 14" />
       <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+    </svg>
+  );
+}
+function ScanIcon({ small }: { small?: boolean }) {
+  const s = small ? 16 : 26;
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+      <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+      <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+      <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+    </svg>
+  );
+}
+function MicIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <line x1="12" y1="19" x2="12" y2="23" />
+      <line x1="8" y1="23" x2="16" y2="23" />
+    </svg>
+  );
+}
+function CloseIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
     </svg>
   );
 }
