@@ -735,12 +735,12 @@ input[type="file"] { display: none; }
 .loc-head {
   display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px;
 }
-.loc-head label {
+.loc-head label, .loc-label {
   font-size: 11px; color: var(--text-faint);
   text-transform: uppercase; letter-spacing: 0.1em;
 }
 .loc-code { font-size: 13px; color: var(--accent); }
-.loc-grid { display: grid; grid-template-columns: 1.4fr 0.7fr 1fr; gap: 8px; }
+.loc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
 .loc-input {
   background: var(--bg-elev);
   border: 1px solid var(--border);
@@ -754,6 +754,53 @@ input[type="file"] { display: none; }
 }
 .loc-input:focus { outline: none; border-color: var(--accent); }
 select.loc-input { appearance: none; -webkit-appearance: none; }
+.loc-input:disabled { opacity: 0.45; }
+
+/* Searchable building picker */
+.building-trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; text-align: left;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 12px;
+  color: var(--text);
+  font-family: inherit; font-size: 15px;
+}
+.building-trigger:active { border-color: var(--accent); }
+.building-trigger .bt-ph { color: var(--text-faint); }
+.building-trigger .bt-val {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.building-combo {
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  background: var(--bg-elev);
+}
+.building-combo .loc-input { width: 100%; }
+.building-list {
+  list-style: none; margin: 8px 0 0; padding: 0;
+  max-height: 240px; overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.building-opt {
+  display: flex; align-items: baseline; gap: 10px;
+  width: 100%; text-align: left;
+  background: none; border: none;
+  padding: 11px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text); font-family: inherit;
+  border-bottom: 1px solid var(--border);
+}
+.building-opt:active { background: var(--bg); }
+.building-opt.sel { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.building-opt .bc { font-size: 13px; color: var(--accent); min-width: 62px; flex-shrink: 0; }
+.building-opt .bn {
+  font-size: 13px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.building-empty { padding: 14px 8px; color: var(--text-faint); font-size: 13px; }
 
 /* Voice notes */
 .notes-head {

@@ -8,7 +8,14 @@ import {
   startTagScan,
   type ScanHandle,
 } from '@/lib/barcode';
-import { buildLocationCode, getBuildings } from '@/lib/locations';
+import {
+  buildLocationCode,
+  buildingLabel,
+  searchBuildings,
+  getStructuredRooms,
+  getFloors,
+  getRooms,
+} from '@/lib/locations';
 import { speechSupported, startDictation, type DictationHandle } from '@/lib/speech';
 import {
   addPhoto,
@@ -84,7 +91,6 @@ export default function CapturePage() {
 
   const [detail, setDetail] = useState<{ packet: LocalPacket; photos: Array<LocalPhoto & { url: string }> } | null>(null);
 
-  const buildings = useMemo(() => getBuildings(), []);
   const canDictate = useMemo(() => speechSupported(), []);
 
 
@@ -606,6 +612,8 @@ export default function CapturePage() {
           </div>
 
           <main className="capture-body" role="main">
+            <LocationPicker value={draft.location} onChange={setLoc} />
+
             {!draftHasTag && (
               <>
                 <button
@@ -703,46 +711,6 @@ export default function CapturePage() {
                   onChange={(e) => handlePhoto(e, 'nameplate')}
                   aria-label="Capture nameplate photo"
                 />
-
-                <div className="loc-section">
-                  <div className="loc-head">
-                    <label htmlFor="loc-building">Location</label>
-                    <span className="loc-code mono" aria-live="polite">
-                      {buildLocationCode(draft.location.building, draft.location.floor, draft.location.room) || '—'}
-                    </span>
-                  </div>
-                  <div className="loc-grid">
-                    <select
-                      id="loc-building"
-                      className="loc-input"
-                      value={draft.location.building}
-                      onChange={(e) => setLoc({ building: e.target.value })}
-                      aria-label="Building"
-                    >
-                      <option value="">Building…</option>
-                      {buildings.map((b) => (
-                        <option key={b.code} value={b.code}>
-                          {b.code} · {b.abbr}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      className="loc-input"
-                      inputMode="text"
-                      placeholder="Floor"
-                      value={draft.location.floor}
-                      onChange={(e) => setLoc({ floor: e.target.value })}
-                      aria-label="Floor"
-                    />
-                    <input
-                      className="loc-input"
-                      placeholder="Room"
-                      value={draft.location.room}
-                      onChange={(e) => setLoc({ room: e.target.value })}
-                      aria-label="Room"
-                    />
-                  </div>
-                </div>
 
                 <div className="notes-section">
                   <div className="notes-head">
@@ -919,6 +887,149 @@ function fmtTime(ms: number) {
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// Location picker: searchable building combobox + floor/room. Buildings with a
+// verified room list (95 Kirkham, code 2264) get dropdowns; everything else is
+// free text so a tech is never blocked by missing data.
+function LocationPicker({
+  value,
+  onChange,
+}: {
+  value: DraftLocation;
+  onChange: (patch: Partial<DraftLocation>) => void;
+}) {
+  const structured = getStructuredRooms(value.building);
+  const floors = structured ? getFloors(value.building) : [];
+  const rooms = structured ? getRooms(value.building, value.floor) : [];
+  const code = buildLocationCode(value.building, value.floor, value.room);
+
+  return (
+    <div className="loc-section">
+      <div className="loc-head">
+        <span className="loc-label">Location</span>
+        <span className="loc-code mono" aria-live="polite">{code || '—'}</span>
+      </div>
+
+      <BuildingCombo
+        value={value.building}
+        onSelect={(building) => onChange({ building, floor: '', room: '' })}
+      />
+
+      <div className="loc-grid">
+        {structured ? (
+          <>
+            <select
+              className="loc-input"
+              value={value.floor}
+              onChange={(e) => onChange({ floor: e.target.value, room: '' })}
+              aria-label="Floor"
+            >
+              <option value="">Floor…</option>
+              {floors.map((f) => (
+                <option key={f} value={f}>Fl {f}</option>
+              ))}
+            </select>
+            <select
+              className="loc-input"
+              value={value.room}
+              onChange={(e) => onChange({ room: e.target.value })}
+              aria-label="Room"
+              disabled={!value.floor}
+            >
+              <option value="">Room…</option>
+              {rooms.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          </>
+        ) : (
+          <>
+            <input
+              className="loc-input"
+              inputMode="text"
+              placeholder="Floor"
+              value={value.floor}
+              onChange={(e) => onChange({ floor: e.target.value })}
+              aria-label="Floor"
+            />
+            <input
+              className="loc-input"
+              placeholder="Room"
+              value={value.room}
+              onChange={(e) => onChange({ room: e.target.value })}
+              aria-label="Room"
+            />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Type-to-search over all 253 buildings. Collapsed it shows the current pick;
+// tapping opens a filter box + result list. Filters by code or name.
+function BuildingCombo({
+  value,
+  onSelect,
+}: {
+  value: string;
+  onSelect: (code: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const results = useMemo(() => searchBuildings(query), [query]);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="building-trigger"
+        onClick={() => { setQuery(''); setOpen(true); }}
+        aria-label="Choose building"
+      >
+        <span className={value ? 'bt-val' : 'bt-ph'}>
+          {value ? buildingLabel(value) : 'Search building…'}
+        </span>
+        <ChevronDownIcon />
+      </button>
+    );
+  }
+
+  return (
+    <div className="building-combo">
+      <input
+        autoFocus
+        className="loc-input"
+        placeholder="Type building code or name…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        aria-label="Search building"
+      />
+      <ul className="building-list" role="listbox" aria-label="Building results">
+        {results.map((b) => (
+          <li key={b.code}>
+            <button
+              type="button"
+              className={`building-opt ${b.code === value ? 'sel' : ''}`}
+              onClick={() => { onSelect(b.code); setOpen(false); }}
+            >
+              <span className="bc mono">{b.code}</span>
+              <span className="bn">{b.name}</span>
+            </button>
+          </li>
+        ))}
+        {results.length === 0 && <li className="building-empty">No match</li>}
+      </ul>
+      <button
+        type="button"
+        className="link-btn"
+        onClick={() => setOpen(false)}
+      >
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 // ---- Icons -----------------------------------------------------------
 
 function PlusIcon() {
@@ -970,6 +1081,13 @@ function ScanIcon({ small }: { small?: boolean }) {
       <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
       <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
       <line x1="3" y1="12" x2="21" y2="12" />
+    </svg>
+  );
+}
+function ChevronDownIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="6 9 12 15 18 9" />
     </svg>
   );
 }
