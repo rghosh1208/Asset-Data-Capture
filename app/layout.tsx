@@ -35,8 +35,30 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           dangerouslySetInnerHTML={{
             __html: `
               if ('serviceWorker' in navigator) {
-                window.addEventListener('load', () => {
-                  navigator.serviceWorker.register('/sw.js').catch(() => {});
+                // Auto-update: when a newly deployed service worker takes
+                // control, reload the page once so the running session swaps to
+                // the new code — no tech has to close or refresh the app.
+                var refreshing = false;
+                var hadController = !!navigator.serviceWorker.controller;
+                navigator.serviceWorker.addEventListener('controllerchange', function () {
+                  if (refreshing) return;
+                  // First-ever install claims the page with no prior controller;
+                  // don't reload on that (nothing to swap). Only reload on updates.
+                  if (!hadController) { hadController = true; return; }
+                  refreshing = true;
+                  window.location.reload();
+                });
+                window.addEventListener('load', function () {
+                  navigator.serviceWorker.register('/sw.js').then(function (reg) {
+                    // Long-lived PWA sessions won't navigate for hours, so poll
+                    // for a new deploy when the app regains focus and hourly.
+                    var check = function () { reg.update().catch(function () {}); };
+                    window.addEventListener('focus', check);
+                    document.addEventListener('visibilitychange', function () {
+                      if (document.visibilityState === 'visible') check();
+                    });
+                    setInterval(check, 3600000);
+                  }).catch(function () {});
                 });
               }
             `,
