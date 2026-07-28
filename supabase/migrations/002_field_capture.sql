@@ -15,7 +15,10 @@ create index if not exists capture_packet_scanned_idx  on capture_packet(scanned
 create index if not exists capture_packet_location_idx on capture_packet(location_code);
 
 -- Surface the new fields in the reviewer convenience view.
-create or replace view capture_packet_review as
+-- Drop first: CREATE OR REPLACE VIEW cannot rename/reorder existing columns
+-- (the old view exposed extracted_asset_num where scanned_asset_num now sits).
+drop view if exists capture_packet_review;
+create view capture_packet_review as
 select
   p.id,
   p.captured_at,

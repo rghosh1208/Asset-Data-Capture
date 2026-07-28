@@ -81,8 +81,19 @@ async function syncPacket(p: LocalPacket): Promise<void> {
   if (phErr) throw new Error(`photo insert: ${phErr.message}`);
 }
 
+// Group photos by kind inside the packet folder so the storage bucket shows
+// a clear tag / asset / nameplate distinction, e.g.
+//   asset-captures/{packetId}/tag/{photoId}.jpg
+//   asset-captures/{packetId}/asset/{photoId}.jpg
+//   asset-captures/{packetId}/nameplate/{photoId}.jpg
+function photoKind(type: LocalPhoto['type']): string {
+  if (type === 'tag') return 'tag';
+  if (type === 'other') return 'asset';
+  return 'nameplate';
+}
+
 function storagePath(packetId: string, ph: LocalPhoto) {
-  return `${packetId}/${ph.id}.jpg`;
+  return `${packetId}/${photoKind(ph.type)}/${ph.id}.jpg`;
 }
 
 async function uploadPhoto(packetId: string, ph: LocalPhoto) {
