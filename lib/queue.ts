@@ -128,16 +128,36 @@ export async function updatePacketStatus(
 }
 
 // ---- Photos --------------------------------------------------------
+//
+// iOS Safari (WebKit) has a long-standing bug where storing a Blob/File
+// directly in IndexedDB throws "Error preparing Blob/File data to be stored
+// in object store". To stay portable we never persist the Blob itself —
+// we store its bytes as an ArrayBuffer plus the mime type, and rebuild the
+// Blob on read. Callers still see LocalPhoto.blob and never touch the raw
+// buffer.
+
+interface StoredPhoto extends Omit<LocalPhoto, 'blob'> {
+  buf: ArrayBuffer;
+  mime: string;
+}
 
 export async function addPhoto(ph: LocalPhoto) {
   const d = await db();
-  await d.put('photos', ph);
+  const { blob, ...rest } = ph;
+  const buf = await blob.arrayBuffer();
+  const stored: StoredPhoto = { ...rest, buf, mime: blob.type || 'image/jpeg' };
+  await d.put('photos', stored);
 }
 
 export async function getPhotosForPacket(packetId: string): Promise<LocalPhoto[]> {
   const d = await db();
-  const all = (await d.getAllFromIndex('photos', 'byPacket', packetId)) as LocalPhoto[];
-  return all.sort((a, b) => a.orderIdx - b.orderIdx);
+  const all = (await d.getAllFromIndex('photos', 'byPacket', packetId)) as StoredPhoto[];
+  return all
+    .sort((a, b) => a.orderIdx - b.orderIdx)
+    .map(({ buf, mime, ...rest }) => ({
+      ...rest,
+      blob: new Blob([buf], { type: mime || 'image/jpeg' }),
+    }));
 }
 
 export async function deletePhoto(id: string) {

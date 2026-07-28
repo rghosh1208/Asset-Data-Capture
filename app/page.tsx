@@ -3,12 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { processPhoto, SHARPNESS_WARN_THRESHOLD } from '@/lib/photo';
 import {
-  captureFrame,
-  normalizeAssetNumber,
-  startTagScan,
-  type ScanHandle,
-} from '@/lib/barcode';
-import {
   buildLocationCode,
   buildingLabel,
   searchBuildings,
@@ -78,13 +72,6 @@ export default function CapturePage() {
   const notesRef = useRef<HTMLTextAreaElement>(null);
   const [blurWarn, setBlurWarn] = useState(false);
 
-  // Barcode scanner
-  const [scanning, setScanning] = useState(false);
-  const [scanError, setScanError] = useState<string | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const scanHandleRef = useRef<ScanHandle | null>(null);
-  const scanBusyRef = useRef(false);
-
   // Voice notes
   const [dictating, setDictating] = useState(false);
   const dictationRef = useRef<DictationHandle | null>(null);
@@ -118,7 +105,6 @@ export default function CapturePage() {
     return () => {
       window.removeEventListener('online', up);
       window.removeEventListener('offline', down);
-      scanHandleRef.current?.stop();
       dictationRef.current?.stop();
     };
   }, []);
@@ -181,7 +167,6 @@ export default function CapturePage() {
       if (!confirm('Discard this asset and its photos?')) return;
       draft.photos.forEach((p) => URL.revokeObjectURL(p.url));
     }
-    stopScan();
     stopDictation();
     setDraft(null);
     setView('home');
@@ -201,9 +186,9 @@ export default function CapturePage() {
     }
   }
 
-  // Shared path for photos arriving from either the file camera or a scanned
-  // frame. Runs the blur guard on the tag shot — the one photo that absolutely
-  // must stay readable for later reconciliation.
+  // Shared path for photos arriving from the file camera. Runs the blur guard
+  // on the tag shot — the one photo that absolutely must stay readable for
+  // later reconciliation.
   function addProcessedPhoto(
     processed: { blob: Blob; width: number; height: number; sharpness: number },
     type: PhotoType,
@@ -254,76 +239,6 @@ export default function CapturePage() {
     setBlurWarn(false);
   }
 
-  // ---- Barcode / QR scan ----
-  async function openScan() {
-    setScanError(null);
-    setScanning(true);
-    // Give React a tick to mount the <video> before we bind the stream.
-    await new Promise((r) => setTimeout(r, 0));
-    const video = videoRef.current;
-    if (!video) {
-      setScanning(false);
-      return;
-    }
-    try {
-      scanHandleRef.current = await startTagScan(
-        video,
-        (text) => onScanDecoded(text),
-        (err) => setScanError(err instanceof Error ? err.message : 'Scanner error'),
-      );
-    } catch (err) {
-      setScanError(
-        err instanceof Error ? err.message : 'Camera unavailable — use Photograph instead',
-      );
-    }
-  }
-
-  async function onScanDecoded(text: string) {
-    if (scanBusyRef.current) return; // ignore repeat reads while we finish up
-    scanBusyRef.current = true;
-    const video = videoRef.current;
-    const assetNum = normalizeAssetNumber(text);
-    try {
-      if (navigator.vibrate) navigator.vibrate(60);
-      // Grab the current frame as the tag photo, so the packet keeps proof.
-      if (video) {
-        const frame = await captureFrame(video);
-        const processed = await processPhoto(frame);
-        addProcessedPhoto(processed, 'tag');
-      }
-      setDraft((prev) => (prev ? { ...prev, assetNum } : prev));
-      showToast(`Scanned ${assetNum}`);
-    } catch (err) {
-      showToast('Scan capture failed — try Photograph');
-    } finally {
-      stopScan();
-      scanBusyRef.current = false;
-    }
-  }
-
-  function stopScan() {
-    try {
-      scanHandleRef.current?.stop();
-    } catch {
-      /* noop */
-    }
-    scanHandleRef.current = null;
-    // Explicitly release the camera. On iOS a live MediaStream left attached to
-    // the <video> can keep the camera busy and stall the very next operation
-    // (e.g. the save that runs right after a scan) — so stop every track.
-    const v = videoRef.current;
-    const stream = v?.srcObject as MediaStream | null;
-    if (stream) {
-      try {
-        stream.getTracks().forEach((t) => t.stop());
-      } catch {
-        /* noop */
-      }
-      if (v) v.srcObject = null;
-    }
-    setScanning(false);
-  }
-
   // ---- Voice notes ----
   function toggleDictation() {
     if (dictating) {
@@ -369,7 +284,7 @@ export default function CapturePage() {
     if (saving) return; // guard against double-taps on a slow phone
     const hasTag = draft.photos.some((p) => p.type === 'tag');
     if (!hasTag) {
-      showToast('Scan or photograph the asset tag first');
+      showToast('Photograph the asset tag first');
       return;
     }
 
@@ -575,7 +490,7 @@ export default function CapturePage() {
     </svg>
   </div>
   <h3>Tap to start a capture</h3>
-  <p>Set the location, then scan or shoot the tag.<br />Add nameplates and save.</p>
+  <p>Set the location, then shoot the tag.<br />Add nameplates and save.</p>
 </button>
             ) : (
               <ul style={{ listStyle: 'none', padding: 0, margin: 0 }} aria-label="Captured packets">
@@ -668,9 +583,6 @@ export default function CapturePage() {
                   <h3>Photograph asset tag</h3>
                   <p>Take a clear, close photo of the whole UCSF tag.<br />The asset number is read from the photo later.</p>
                 </button>
-                <button type="button" className="link-btn" onClick={openScan}>
-                  Try barcode scan instead
-                </button>
               </>
             )}
             <input
@@ -684,21 +596,6 @@ export default function CapturePage() {
 
             {draftHasTag && (
               <>
-                {draft.assetNum ? (
-                  <div className="asset-chip">
-                    <span className="asset-chip-label">Asset</span>
-                    <span className="asset-chip-num mono">{draft.assetNum}</span>
-                    <button className="asset-chip-edit" onClick={openScan} aria-label="Rescan asset tag">
-                      <ScanIcon small />
-                    </button>
-                  </div>
-                ) : (
-                  <button type="button" className="asset-chip ghost" onClick={openScan}>
-                    <ScanIcon small />
-                    <span>Scan tag barcode for exact asset #</span>
-                  </button>
-                )}
-
                 {blurWarn && (
                   <div className="blur-warn" role="alert">
                     <div className="blur-warn-text">
@@ -907,22 +804,6 @@ export default function CapturePage() {
     </button>
   </div>
 </div>
-
-      {/* ====== SCANNER OVERLAY ====== */}
-      {scanning && (
-        <div className="scanner">
-          <video ref={videoRef} className="scanner-video" muted playsInline autoPlay />
-          <div className="scanner-frame" aria-hidden="true" />
-          <div className="scanner-top">
-            <button className="scanner-close" onClick={stopScan} aria-label="Close scanner">
-              <CloseIcon />
-            </button>
-          </div>
-          <div className="scanner-hint" role="status" aria-live="polite">
-            {scanError ? scanError : 'Center the barcode or QR in the box'}
-          </div>
-        </div>
-      )}
 
       {/* ====== TOAST ====== */}
       <div className={`toast ${toast ? 'show' : ''}`} role="status" aria-live="polite">
@@ -1139,18 +1020,6 @@ function SyncIcon() {
     </svg>
   );
 }
-function ScanIcon({ small }: { small?: boolean }) {
-  const s = small ? 16 : 26;
-  return (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 7V5a2 2 0 0 1 2-2h2" />
-      <path d="M17 3h2a2 2 0 0 1 2 2v2" />
-      <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
-      <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
-      <line x1="3" y1="12" x2="21" y2="12" />
-    </svg>
-  );
-}
 function CameraIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1173,14 +1042,6 @@ function MicIcon() {
       <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
       <line x1="12" y1="19" x2="12" y2="23" />
       <line x1="8" y1="23" x2="16" y2="23" />
-    </svg>
-  );
-}
-function CloseIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
     </svg>
   );
 }
