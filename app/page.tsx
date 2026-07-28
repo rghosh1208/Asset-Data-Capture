@@ -349,79 +349,96 @@ export default function CapturePage() {
     setDraft((prev) => (prev ? { ...prev, location: { ...prev.location, ...patch } } : prev));
   }
 
+  const [saving, setSaving] = useState(false);
+
   async function savePacketLocal(thenStartNext: boolean) {
     if (!draft || !tech) return;
+    if (saving) return; // guard against double-taps on a slow phone
     const hasTag = draft.photos.some((p) => p.type === 'tag');
-    if (!hasTag) return;
+    if (!hasTag) {
+      showToast('Scan or photograph the asset tag first');
+      return;
+    }
 
-    const deviceId = await getDeviceId();
-    const loc = await tryGetLocation();
-    const tagPhoto = draft.photos.find((p) => p.type === 'tag');
-    const locationCode = buildLocationCode(
-      draft.location.building,
-      draft.location.floor,
-      draft.location.room,
-    );
+    setSaving(true);
+    try {
+      const deviceId = await getDeviceId();
+      const loc = await tryGetLocation();
+      const tagPhoto = draft.photos.find((p) => p.type === 'tag');
+      const locationCode = buildLocationCode(
+        draft.location.building,
+        draft.location.floor,
+        draft.location.room,
+      );
 
-    // Remember this location so the next asset in the same room prefills.
-    await setSetting('lastLocation', draft.location);
+      // Remember this location so the next asset in the same room prefills.
+      await setSetting('lastLocation', draft.location);
 
-    const packet: LocalPacket = {
-      id: draft.id,
-      capturedAt: draft.capturedAt,
-      techName: tech,
-      deviceId,
-      lat: loc?.lat,
-      lng: loc?.lng,
-      scannedAssetNum: draft.assetNum || undefined,
-      building: draft.location.building || undefined,
-      locationCode: locationCode || undefined,
-      tagSharpness: tagPhoto?.sharpness,
-      notes: notesRef.current?.value || '',
-      status: 'pending',
-    };
-    await savePacket(packet);
-
-    let order = 0;
-    for (const p of draft.photos) {
-      const ph: LocalPhoto = {
-        id: p.id,
-        packetId: packet.id,
-        type: p.type,
-        blob: p.blob,
-        width: p.width,
-        height: p.height,
-        orderIdx: order++,
-        createdAt: Date.now(),
+      const packet: LocalPacket = {
+        id: draft.id,
+        capturedAt: draft.capturedAt,
+        techName: tech,
+        deviceId,
+        lat: loc?.lat,
+        lng: loc?.lng,
+        scannedAssetNum: draft.assetNum || undefined,
+        building: draft.location.building || undefined,
+        locationCode: locationCode || undefined,
+        tagSharpness: tagPhoto?.sharpness,
+        notes: notesRef.current?.value || '',
+        status: 'pending',
       };
-      await addPhoto(ph);
-    }
+      await savePacket(packet);
 
-    if (navigator.onLine) {
-      syncAllPending().then(() => refreshPackets());
-    }
+      let order = 0;
+      for (const p of draft.photos) {
+        const ph: LocalPhoto = {
+          id: p.id,
+          packetId: packet.id,
+          type: p.type,
+          blob: p.blob,
+          width: p.width,
+          height: p.height,
+          orderIdx: order++,
+          createdAt: Date.now(),
+        };
+        await addPhoto(ph);
+      }
 
-    showToast(thenStartNext ? 'Saved — start the next' : 'Saved');
+      if (navigator.onLine) {
+        syncAllPending().then(() => refreshPackets()).catch(() => {});
+      }
 
-    // Reset draft for next packet — keep the location so a room-by-room sweep
-    // doesn't re-enter it each time.
-    draft.photos.forEach((p) => URL.revokeObjectURL(p.url));
-    setBlurWarn(false);
-    if (thenStartNext) {
-      setDraft({
-        id: newPacketId(),
-        capturedAt: Date.now(),
-        photos: [],
-        assetNum: '',
-        location: draft.location,
-        notes: '',
-      });
-      if (notesRef.current) notesRef.current.value = '';
-    } else {
-      setDraft(null);
-      setView('home');
+      showToast(thenStartNext ? 'Saved — start the next' : 'Saved');
+
+      // Reset draft for next packet — keep the location so a room-by-room sweep
+      // doesn't re-enter it each time.
+      draft.photos.forEach((p) => URL.revokeObjectURL(p.url));
+      setBlurWarn(false);
+      if (thenStartNext) {
+        setDraft({
+          id: newPacketId(),
+          capturedAt: Date.now(),
+          photos: [],
+          assetNum: '',
+          location: draft.location,
+          notes: '',
+        });
+        if (notesRef.current) notesRef.current.value = '';
+      } else {
+        setDraft(null);
+        setView('home');
+      }
+      refreshPackets();
+    } catch (err) {
+      // Never fail silently — the draft is kept so the tech can retry.
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(`Save failed: ${msg}`);
+      // eslint-disable-next-line no-console
+      console.error('savePacketLocal failed', err);
+    } finally {
+      setSaving(false);
     }
-    refreshPackets();
   }
 
   async function tryGetLocation(): Promise<{ lat: number; lng: number } | null> {
@@ -772,11 +789,11 @@ export default function CapturePage() {
               <button className="btn btn-danger" onClick={cancelCapture}>Discard</button>
               <button
                 className="btn btn-primary"
-                disabled={!draftHasTag}
+                disabled={!draftHasTag || saving}
                 onClick={() => savePacketLocal(true)}
                 aria-label={draftHasTag ? 'Save this asset and start a new one' : 'Capture asset tag first to enable save'}
               >
-                <CheckIcon /> Save &amp; next
+                <CheckIcon /> {saving ? 'Saving…' : 'Save & next'}
               </button>
             </div>
           </div>
