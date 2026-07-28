@@ -82,14 +82,16 @@ async function syncPacket(p: LocalPacket): Promise<void> {
 }
 
 // Group photos by kind inside the packet folder so the storage bucket shows
-// a clear tag / asset / nameplate distinction, e.g.
-//   asset-captures/{packetId}/tag/{photoId}.jpg
-//   asset-captures/{packetId}/asset/{photoId}.jpg
-//   asset-captures/{packetId}/nameplate/{photoId}.jpg
+// a clear distinction, e.g.
+//   asset-captures/{packetId}/Asset Tag/{photoId}.jpg
+//   asset-captures/{packetId}/Asset Image/{photoId}.jpg
+//   asset-captures/{packetId}/Other Nameplate & Stickers/{photoId}.jpg
+// (A literal "/" in the folder name would create a nested folder, so the
+// nameplate label uses "&" instead of a slash.)
 function photoKind(type: LocalPhoto['type']): string {
-  if (type === 'tag') return 'tag';
-  if (type === 'other') return 'asset';
-  return 'nameplate';
+  if (type === 'tag') return 'Asset Tag';
+  if (type === 'other') return 'Asset Image';
+  return 'Other Nameplate & Stickers';
 }
 
 function storagePath(packetId: string, ph: LocalPhoto) {
