@@ -73,6 +73,7 @@ export default function CapturePage() {
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
+  const assetInputRef = useRef<HTMLInputElement>(null);
   const plateInputRef = useRef<HTMLInputElement>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
   const [blurWarn, setBlurWarn] = useState(false);
@@ -218,7 +219,12 @@ export default function CapturePage() {
         width: processed.width,
         height: processed.height,
         sharpness: processed.sharpness,
-        name: type === 'tag' ? 'asset_tag.jpg' : `nameplate_${prev.photos.length}.jpg`,
+        name:
+          type === 'tag'
+            ? 'asset_tag.jpg'
+            : type === 'other'
+              ? `asset_${prev.photos.length}.jpg`
+              : `nameplate_${prev.photos.length}.jpg`,
       };
       return { ...prev, photos: [...prev.photos, newPhoto] };
     });
@@ -679,19 +685,41 @@ export default function CapturePage() {
                 <ul className="photo-list" style={{ listStyle: 'none', padding: 0, margin: '0 0 16px' }} aria-label="Captured photos">
                   {draft.photos.map((p, i) => (
                     <li key={p.id} className={`photo-item ${p.type === 'tag' ? 'tag' : ''}`}>
-                      <img src={p.url} alt={p.type === 'tag' ? 'Asset tag preview' : 'Nameplate preview'} />
+                      <img src={p.url} alt={`${photoLabel(p.type)} preview`} />
                       <div className="photo-item-info">
                         <div className="photo-item-type">
-                          {p.type === 'tag' ? '★ Asset tag' : 'Nameplate'}
+                          {p.type === 'tag' ? '★ Asset tag' : photoLabel(p.type)}
                         </div>
                         <div className="photo-item-name">{p.name}</div>
                       </div>
-                      <button className="photo-delete" onClick={() => removePhoto(i)} aria-label={`Remove ${p.type === 'tag' ? 'asset tag' : 'nameplate'} photo`}>
+                      <button className="photo-delete" onClick={() => removePhoto(i)} aria-label={`Remove ${photoLabel(p.type).toLowerCase()} photo`}>
                         <TrashIcon />
                       </button>
                     </li>
                   ))}
                 </ul>
+
+                <button
+                  type="button"
+                  className="photo-target compact"
+                  onClick={() => assetInputRef.current?.click()}
+                  aria-label="Add a photo of the asset itself"
+                  style={{ width: '100%', font: 'inherit', textAlign: 'left' }}
+                >
+                  <div className="photo-target-icon" aria-hidden="true"><CameraIcon /></div>
+                  <div>
+                    <h3>Add asset photo</h3>
+                    <p>The equipment itself — a wide shot of the whole unit.</p>
+                  </div>
+                </button>
+                <input
+                  ref={assetInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) => handlePhoto(e, 'other')}
+                  aria-label="Capture asset photo"
+                />
 
                 <button
                   type="button"
@@ -784,7 +812,7 @@ export default function CapturePage() {
                 <img
                   key={p.id}
                   src={p.url}
-                  alt={p.type === 'tag' ? 'Asset tag' : 'Nameplate'}
+                  alt={photoLabel(p.type)}
                   role="listitem"
                 />
               ))}
@@ -888,6 +916,12 @@ function MetaRow({ k, v }: { k: string; v: string }) {
 
 function fmtTime(ms: number) {
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function photoLabel(type: PhotoType): string {
+  if (type === 'tag') return 'Asset tag';
+  if (type === 'other') return 'Asset photo';
+  return 'Nameplate';
 }
 
 // Location picker: searchable building combobox + floor/room. Buildings with a
@@ -1084,6 +1118,14 @@ function ScanIcon({ small }: { small?: boolean }) {
       <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
       <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
       <line x1="3" y1="12" x2="21" y2="12" />
+    </svg>
+  );
+}
+function CameraIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
     </svg>
   );
 }
