@@ -308,6 +308,19 @@ export default function CapturePage() {
       /* noop */
     }
     scanHandleRef.current = null;
+    // Explicitly release the camera. On iOS a live MediaStream left attached to
+    // the <video> can keep the camera busy and stall the very next operation
+    // (e.g. the save that runs right after a scan) — so stop every track.
+    const v = videoRef.current;
+    const stream = v?.srcObject as MediaStream | null;
+    if (stream) {
+      try {
+        stream.getTracks().forEach((t) => t.stop());
+      } catch {
+        /* noop */
+      }
+      if (v) v.srcObject = null;
+    }
     setScanning(false);
   }
 
@@ -645,18 +658,18 @@ export default function CapturePage() {
                 <button
                   type="button"
                   className="photo-target"
-                  onClick={openScan}
-                  aria-label="Scan the asset tag barcode or QR code"
+                  onClick={() => tagInputRef.current?.click()}
+                  aria-label="Photograph the asset tag"
                   style={{ width: '100%', font: 'inherit' }}
                 >
                   <div className="photo-target-icon" aria-hidden="true">
-                    <ScanIcon />
+                    <CameraIcon />
                   </div>
-                  <h3>Scan asset tag</h3>
-                  <p>Point at the barcode or QR on the UCSF tag.<br />We&apos;ll read the asset number and keep the photo.</p>
+                  <h3>Photograph asset tag</h3>
+                  <p>Take a clear, close photo of the whole UCSF tag.<br />The asset number is read from the photo later.</p>
                 </button>
-                <button type="button" className="link-btn" onClick={() => tagInputRef.current?.click()}>
-                  No barcode? Photograph the tag instead
+                <button type="button" className="link-btn" onClick={openScan}>
+                  Try barcode scan instead
                 </button>
               </>
             )}
