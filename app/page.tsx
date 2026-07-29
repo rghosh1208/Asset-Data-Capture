@@ -876,6 +876,21 @@ function LocationPicker({
   const rooms = structured ? getRooms(value.building, value.floor) : [];
   const code = buildLocationCode(value.building, value.floor, value.room);
 
+  // Escape hatch: even when a building has a verified room list, let the tech
+  // type a floor/room the dropdown doesn't have. A value that isn't in the
+  // list — or an explicit "Other…" pick — flips that field to a free-text box.
+  const [floorOther, setFloorOther] = useState(false);
+  const [roomOther, setRoomOther] = useState(false);
+  useEffect(() => {
+    setFloorOther(false);
+    setRoomOther(false);
+  }, [value.building]);
+
+  const floorCustom =
+    !!structured && (floorOther || (value.floor !== '' && !floors.includes(value.floor)));
+  const roomCustom =
+    !!structured && (roomOther || (value.room !== '' && !rooms.includes(value.room)));
+
   return (
     <div className="loc-section">
       <div className="loc-head">
@@ -891,29 +906,67 @@ function LocationPicker({
       <div className="loc-grid">
         {structured ? (
           <>
-            <select
-              className="loc-input"
-              value={value.floor}
-              onChange={(e) => onChange({ floor: e.target.value, room: '' })}
-              aria-label="Floor"
-            >
-              <option value="">Floor…</option>
-              {floors.map((f) => (
-                <option key={f} value={f}>Fl {f}</option>
-              ))}
-            </select>
-            <select
-              className="loc-input"
-              value={value.room}
-              onChange={(e) => onChange({ room: e.target.value })}
-              aria-label="Room"
-              disabled={!value.floor}
-            >
-              <option value="">Room…</option>
-              {rooms.map((r) => (
-                <option key={r} value={r}>{r}</option>
-              ))}
-            </select>
+            {floorCustom ? (
+              <input
+                className="loc-input"
+                placeholder="Type floor"
+                value={value.floor}
+                onChange={(e) => onChange({ floor: e.target.value })}
+                aria-label="Custom floor"
+                autoFocus
+              />
+            ) : (
+              <select
+                className="loc-input"
+                value={value.floor}
+                onChange={(e) => {
+                  if (e.target.value === '__other__') {
+                    setFloorOther(true);
+                    onChange({ floor: '', room: '' });
+                  } else {
+                    onChange({ floor: e.target.value, room: '' });
+                  }
+                }}
+                aria-label="Floor"
+              >
+                <option value="">Floor…</option>
+                {floors.map((f) => (
+                  <option key={f} value={f}>Fl {f}</option>
+                ))}
+                <option value="__other__">＋ Other floor…</option>
+              </select>
+            )}
+            {roomCustom ? (
+              <input
+                className="loc-input"
+                placeholder="Type room"
+                value={value.room}
+                onChange={(e) => onChange({ room: e.target.value })}
+                aria-label="Custom room"
+                autoFocus
+              />
+            ) : (
+              <select
+                className="loc-input"
+                value={value.room}
+                onChange={(e) => {
+                  if (e.target.value === '__other__') {
+                    setRoomOther(true);
+                    onChange({ room: '' });
+                  } else {
+                    onChange({ room: e.target.value });
+                  }
+                }}
+                aria-label="Room"
+                disabled={!value.floor}
+              >
+                <option value="">Room…</option>
+                {rooms.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+                <option value="__other__">＋ Other room…</option>
+              </select>
+            )}
           </>
         ) : (
           <>
@@ -935,6 +988,27 @@ function LocationPicker({
           </>
         )}
       </div>
+
+      {structured && floorCustom && (
+        <button
+          type="button"
+          className="link-btn"
+          style={{ marginTop: 6 }}
+          onClick={() => { setFloorOther(false); onChange({ floor: '', room: '' }); }}
+        >
+          Floor: use dropdown list
+        </button>
+      )}
+      {structured && roomCustom && (
+        <button
+          type="button"
+          className="link-btn"
+          style={{ marginTop: 6 }}
+          onClick={() => { setRoomOther(false); onChange({ room: '' }); }}
+        >
+          Room: use dropdown list
+        </button>
+      )}
     </div>
   );
 }
