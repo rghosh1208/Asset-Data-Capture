@@ -485,11 +485,8 @@ export default function CapturePage() {
 >
   <div className="empty-icon" aria-hidden="true">
     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 7V5a2 2 0 0 1 2-2h2" />
-      <path d="M17 3h2a2 2 0 0 1 2 2v2" />
-      <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
-      <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
-      <line x1="7" y1="12" x2="17" y2="12" />
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
     </svg>
   </div>
   <h3>Tap to start a capture</h3>
@@ -658,7 +655,7 @@ export default function CapturePage() {
                   aria-label="Add another nameplate or sticker photo"
                   style={{ width: '100%', font: 'inherit', textAlign: 'left' }}
                 >
-                  <div className="photo-target-icon" aria-hidden="true"><PlusIcon /></div>
+                  <div className="photo-target-icon" aria-hidden="true"><TagIcon /></div>
                   <div>
                     <h3>Add nameplate / sticker</h3>
                     <p>Manufacturer, serial, model, install date — any sticker.</p>
@@ -680,7 +677,7 @@ export default function CapturePage() {
                   aria-label="Add a sub-component or part photo"
                   style={{ width: '100%', font: 'inherit', textAlign: 'left' }}
                 >
-                  <div className="photo-target-icon" aria-hidden="true"><PlusIcon /></div>
+                  <div className="photo-target-icon" aria-hidden="true"><ChipIcon /></div>
                   <div>
                     <h3>Add sub-component / part</h3>
                     <p>A specific part or sub-assembly — motor, valve, board, sensor.</p>
@@ -1125,6 +1122,30 @@ function CameraIcon() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
       <circle cx="12" cy="13" r="4" />
+    </svg>
+  );
+}
+function TagIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+      <line x1="7" y1="7" x2="7.01" y2="7" />
+    </svg>
+  );
+}
+function ChipIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
+      <rect x="9" y="9" width="6" height="6" />
+      <line x1="9" y1="1" x2="9" y2="4" />
+      <line x1="15" y1="1" x2="15" y2="4" />
+      <line x1="9" y1="20" x2="9" y2="23" />
+      <line x1="15" y1="20" x2="15" y2="23" />
+      <line x1="20" y1="9" x2="23" y2="9" />
+      <line x1="20" y1="14" x2="23" y2="14" />
+      <line x1="1" y1="9" x2="4" y2="9" />
+      <line x1="1" y1="14" x2="4" y2="14" />
     </svg>
   );
 }
