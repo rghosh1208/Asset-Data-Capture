@@ -28,6 +28,7 @@ export interface LocalPacket {
   building?: string;         // building code, e.g. 2252
   locationCode?: string;     // assembled UCSF code, e.g. 2252-01-1C3
   tagSharpness?: number;     // focus metric of the tag photo (higher = sharper)
+  noTag?: boolean;           // true = asset has no UCSF tag (captured by photos only)
   notes: string;
   status: SyncStatus;
   lastError?: string;

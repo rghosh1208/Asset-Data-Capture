@@ -2,6 +2,10 @@ node_modules/
 .next/
 .env.local
 .env*.local
+.env.extract
+
+# Extraction outputs — contain real asset data, keep out of git
+asset_extraction_*.xlsx
 .DS_Store
 *.log
 .vercel

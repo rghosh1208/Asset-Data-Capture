@@ -54,6 +54,7 @@ interface Draft {
   assetNum: string;      // scanned from the tag; '' until scanned
   location: DraftLocation;
   notes: string;
+  noTag: boolean;        // true = asset has no UCSF tag; captured by photos only
 }
 
 export default function CapturePage() {
@@ -145,7 +146,7 @@ export default function CapturePage() {
     return last ?? { building: '', floor: '', room: '' };
   }
 
-  async function startNewPacket() {
+  async function startNewPacket(noTag = false) {
     if (!tech) {
       setTechModal(true);
       return;
@@ -159,6 +160,7 @@ export default function CapturePage() {
       assetNum: '',
       location: await freshLocation(),
       notes: '',
+      noTag,
     });
     setView('capture');
   }
@@ -286,7 +288,16 @@ export default function CapturePage() {
     if (!draft || !tech) return;
     if (saving) return; // guard against double-taps on a slow phone
     const hasTag = draft.photos.some((p) => p.type === 'tag');
-    if (!hasTag) {
+    if (draft.noTag) {
+      if (draft.photos.length === 0) {
+        showToast('Add at least one photo first');
+        return;
+      }
+      if (!draft.location.building) {
+        showToast('Set the location first');
+        return;
+      }
+    } else if (!hasTag) {
       showToast('Photograph the asset tag first');
       return;
     }
@@ -316,6 +327,7 @@ export default function CapturePage() {
         building: draft.location.building || undefined,
         locationCode: locationCode || undefined,
         tagSharpness: tagPhoto?.sharpness,
+        noTag: draft.noTag || undefined,
         notes: notesRef.current?.value || '',
         status: 'pending',
       };
@@ -354,6 +366,7 @@ export default function CapturePage() {
           assetNum: '',
           location: draft.location,
           notes: '',
+          noTag: draft.noTag,
         });
         if (notesRef.current) notesRef.current.value = '';
       } else {
@@ -427,6 +440,13 @@ export default function CapturePage() {
 
   const draftHasTag = !!draft?.photos.some((p) => p.type === 'tag');
   const draftPhotoCount = draft?.photos.length ?? 0;
+  const isNoTag = !!draft?.noTag;
+  // First capture step is satisfied by the tag photo, or (for untagged assets)
+  // by any photo. Save additionally needs a building for untagged assets.
+  const stepOneDone = isNoTag ? draftPhotoCount > 0 : draftHasTag;
+  const canSave = isNoTag
+    ? draftPhotoCount > 0 && !!draft?.location.building
+    : draftHasTag;
 
   return (
     <div className="app">
@@ -480,7 +500,7 @@ export default function CapturePage() {
               <button
   type="button"
   className="empty empty-clickable"
-  onClick={startNewPacket}
+  onClick={() => startNewPacket()}
   aria-label="Start capturing a new asset"
 >
   <div className="empty-icon" aria-hidden="true">
@@ -510,7 +530,11 @@ export default function CapturePage() {
                         </div>
                         <div className="packet-info">
                           <div className={`packet-id ${p.scannedAssetNum ? '' : 'unknown'}`}>
-                            {p.scannedAssetNum ? p.scannedAssetNum : 'Asset tag · pending OCR'}
+                            {p.scannedAssetNum
+                              ? p.scannedAssetNum
+                              : p.noTag
+                                ? 'Untagged asset'
+                                : 'Asset tag · pending OCR'}
                           </div>
                           <div className="packet-meta">
                             {p.locationCode && <><span className="mono">{p.locationCode}</span><span aria-hidden="true">·</span></>}
@@ -535,7 +559,10 @@ export default function CapturePage() {
               <button className="btn btn-ghost" onClick={syncNow} aria-label="Sync pending packets to server">
                 <SyncIcon /> Sync
               </button>
-              <button className="btn btn-primary" onClick={startNewPacket} aria-label="Start capturing a new asset">
+              <button className="btn btn-ghost" onClick={() => startNewPacket(true)} aria-label="Add a new asset that has no tag">
+                <TagOffIcon /> No tag
+              </button>
+              <button className="btn btn-primary" onClick={() => startNewPacket()} aria-label="Start capturing a new asset">
                 <PlusIcon /> New Asset
               </button>
             </div>
@@ -551,24 +578,28 @@ export default function CapturePage() {
               <ChevronIcon />
             </button>
             <div className="capture-title">
-              <h2>{draftHasTag ? 'Add nameplates' : 'New asset'}</h2>
+              <h2>{isNoTag ? 'New asset · no tag' : draftHasTag ? 'Add nameplates' : 'New asset'}</h2>
               <div className="sub">
-                {draftHasTag
-                  ? `${draftPhotoCount} photo${draftPhotoCount > 1 ? 's' : ''} · keep going or save`
-                  : 'Start with the asset tag'}
+                {isNoTag
+                  ? (draftPhotoCount > 0
+                      ? `${draftPhotoCount} photo${draftPhotoCount > 1 ? 's' : ''} · set location & save`
+                      : 'No tag — photograph the equipment')
+                  : draftHasTag
+                    ? `${draftPhotoCount} photo${draftPhotoCount > 1 ? 's' : ''} · keep going or save`
+                    : 'Start with the asset tag'}
               </div>
             </div>
           </header>
 
-          <div className="steps" role="progressbar" aria-label="Capture progress" aria-valuenow={draftHasTag ? (draftPhotoCount > 1 ? 2 : 1) : 0} aria-valuemin={0} aria-valuemax={2}>
-            <div className={`step-pill ${draftHasTag ? 'done' : 'active'}`} />
-            <div className={`step-pill ${draftPhotoCount > 1 ? 'done' : draftHasTag ? 'active' : ''}`} />
+          <div className="steps" role="progressbar" aria-label="Capture progress" aria-valuenow={stepOneDone ? (draftPhotoCount > 1 ? 2 : 1) : 0} aria-valuemin={0} aria-valuemax={2}>
+            <div className={`step-pill ${stepOneDone ? 'done' : 'active'}`} />
+            <div className={`step-pill ${draftPhotoCount > 1 ? 'done' : stepOneDone ? 'active' : ''}`} />
           </div>
 
           <main className="capture-body" role="main">
             <LocationPicker value={draft.location} onChange={setLoc} />
 
-            {!draftHasTag && (
+            {!draftHasTag && !isNoTag && (
               <>
                 <button
                   type="button"
@@ -594,7 +625,7 @@ export default function CapturePage() {
               aria-label="Capture asset tag photo"
             />
 
-            {draftHasTag && (
+            {(draftHasTag || isNoTag) && (
               <>
                 {blurWarn && (
                   <div className="blur-warn" role="alert">
@@ -721,9 +752,9 @@ export default function CapturePage() {
               <button className="btn btn-danger" onClick={cancelCapture}>Discard</button>
               <button
                 className="btn btn-primary"
-                disabled={!draftHasTag || saving}
+                disabled={!canSave || saving}
                 onClick={() => savePacketLocal(true)}
-                aria-label={draftHasTag ? 'Save this asset and start a new one' : 'Capture asset tag first to enable save'}
+                aria-label={canSave ? 'Save this asset and start a new one' : isNoTag ? 'Add a photo and location to enable save' : 'Capture asset tag first to enable save'}
               >
                 <CheckIcon /> {saving ? 'Saving…' : 'Save & next'}
               </button>
@@ -1146,6 +1177,16 @@ function ChipIcon() {
       <line x1="20" y1="14" x2="23" y2="14" />
       <line x1="1" y1="9" x2="4" y2="9" />
       <line x1="1" y1="14" x2="4" y2="14" />
+    </svg>
+  );
+}
+function TagOffIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9.73 2H12l8.59 8.59a2 2 0 0 1 0 2.82l-3.4 3.4" />
+      <path d="M5.5 5.5 2 9v3l8.59 8.59a2 2 0 0 0 2.82 0L16 18" />
+      <line x1="7" y1="7" x2="7.01" y2="7" />
+      <line x1="1" y1="1" x2="23" y2="23" />
     </svg>
   );
 }
