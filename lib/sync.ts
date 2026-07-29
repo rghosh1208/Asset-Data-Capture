@@ -91,6 +91,7 @@ async function syncPacket(p: LocalPacket): Promise<void> {
 function photoKind(type: LocalPhoto['type']): string {
   if (type === 'tag') return 'Asset Tag';
   if (type === 'other') return 'Asset Image';
+  if (type === 'component') return 'Sub-Components & Parts';
   return 'Other Nameplate & Stickers';
 }
 

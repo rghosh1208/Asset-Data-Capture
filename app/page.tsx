@@ -69,6 +69,7 @@ export default function CapturePage() {
   const tagInputRef = useRef<HTMLInputElement>(null);
   const assetInputRef = useRef<HTMLInputElement>(null);
   const plateInputRef = useRef<HTMLInputElement>(null);
+  const componentInputRef = useRef<HTMLInputElement>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
   const [blurWarn, setBlurWarn] = useState(false);
 
@@ -209,7 +210,9 @@ export default function CapturePage() {
             ? 'asset_tag.jpg'
             : type === 'other'
               ? `asset_${prev.photos.length}.jpg`
-              : `nameplate_${prev.photos.length}.jpg`,
+              : type === 'component'
+                ? `component_${prev.photos.length}.jpg`
+                : `nameplate_${prev.photos.length}.jpg`,
       };
       return { ...prev, photos: [...prev.photos, newPhoto] };
     });
@@ -670,6 +673,28 @@ export default function CapturePage() {
                   aria-label="Capture nameplate photo"
                 />
 
+                <button
+                  type="button"
+                  className="photo-target compact"
+                  onClick={() => componentInputRef.current?.click()}
+                  aria-label="Add a sub-component or part photo"
+                  style={{ width: '100%', font: 'inherit', textAlign: 'left' }}
+                >
+                  <div className="photo-target-icon" aria-hidden="true"><PlusIcon /></div>
+                  <div>
+                    <h3>Add sub-component / part</h3>
+                    <p>A specific part or sub-assembly — motor, valve, board, sensor.</p>
+                  </div>
+                </button>
+                <input
+                  ref={componentInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) => handlePhoto(e, 'component')}
+                  aria-label="Capture sub-component or part photo"
+                />
+
                 <div className="notes-section">
                   <div className="notes-head">
                     <label htmlFor="capture-notes">Notes (optional)</label>
@@ -832,6 +857,7 @@ function fmtTime(ms: number) {
 function photoLabel(type: PhotoType): string {
   if (type === 'tag') return 'Asset tag';
   if (type === 'other') return 'Asset photo';
+  if (type === 'component') return 'Sub-component / part';
   return 'Nameplate';
 }
 

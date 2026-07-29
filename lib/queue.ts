@@ -2,7 +2,7 @@ import { openDB, type IDBPDatabase } from 'idb';
 
 // ---- Types ---------------------------------------------------------
 
-export type PhotoType = 'tag' | 'nameplate' | 'other';
+export type PhotoType = 'tag' | 'nameplate' | 'component' | 'other';
 
 export interface LocalPhoto {
   id: string;            // photo_<ts>_<rand>
