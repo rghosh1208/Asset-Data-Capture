@@ -1,12 +1,19 @@
 // =====================================================================
 // BOSC Asset Capture — packet extraction (Claude vision → review sheet)
 //
-// Walks the capture_packet table, downloads each packet's photos from the
-// Supabase "asset-captures" bucket, sends the tag + nameplate photos to the
-// Claude vision API, and writes the extracted fields into a review
-// spreadsheet (.xlsx) — one row per packet, tag thumbnail embedded, with the
-// field-entered location placed next to the location read off the tag so you
-// can eyeball mismatches before anything is trusted.
+// Walks the capture_packet table, downloads EVERY photo for each packet from
+// the Supabase "asset-captures" bucket, sends them all (plus the field tech's
+// notes) to the Claude vision API, and writes an exhaustive extraction into a
+// review workbook (.xlsx). The goal is to pull *all* asset information present
+// in the pictures — identify what the asset is, read every nameplate/sticker,
+// and capture each sub-component (motor, valve, board, VFD, sensor, …) as its
+// own record with its own make/model/serial/specs.
+//
+// Two sheets:
+//   "Assets"     — one row per packet (the parent asset). Core identity +
+//                  location + main nameplate + a dynamic column for every extra
+//                  spec the model read (voltage, phase, amps, capacity, …).
+//   "Components" — one row per sub-component, linked back to its parent packet.
 //
 // Nothing is written back to Supabase. This is a read-only pull + a local
 // spreadsheet you review and correct by hand.
@@ -28,12 +35,12 @@
 //
 //   node scripts/extract_packets.mjs             # only packets not yet extracted
 //   node scripts/extract_packets.mjs --all       # every packet, re-extract
-//   node scripts/extract_packets.mjs --limit 20  # cap how many are processed
+//   node scripts/extract_packets.mjs --limit 20  # cap how many packets are processed
 //   node scripts/extract_packets.mjs --out ~/Desktop/review.xlsx
 //
 // The service-role key is used only to read rows and download objects. Keep it
 // out of the app and off shared machines. Cost: a few cents per packet on the
-// vision call.
+// vision call (more when a packet has many photos — every photo is sent).
 // =====================================================================
 
 import { createClient } from '@supabase/supabase-js';
@@ -43,7 +50,9 @@ import { writeFileSync } from 'node:fs';
 
 const BUCKET = 'asset-captures';
 const MODEL = process.env.EXTRACT_MODEL || 'claude-sonnet-5';
-const MAX_EXTRA = 5; // cap non-tag images per packet (nameplates + components + others) to keep the payload sane
+// No cap: every photo in a packet is sent. A generous safety ceiling only
+// guards against a runaway packet; raise it if you ever hit it.
+const HARD_IMAGE_CEILING = 40;
 
 // ---- args ----
 const argv = process.argv.slice(2);
@@ -85,35 +94,67 @@ const anthropic = new Anthropic({ apiKey: anthropicKey });
 //   MSB-ESP-PA11B2     -> PMItem ID
 //   Electrical Sub Panel -> description
 //   2252-11-1122       -> location the tag CLAIMS (building-floor-room style)
-// Nameplate/sticker photos carry manufacturer, model, serial, install date, etc.
+// Nameplate/sticker photos carry manufacturer, model, serial, install date,
+// electrical/capacity specs, etc. Component photos are specific sub-assemblies.
+// Some packets have NO tag at all (untagged assets) — for those, the asset must
+// be identified by looking at the equipment itself.
 
-const SYSTEM = `You read photographs of UCSF facilities asset tags and equipment nameplates and return structured data. You are precise and never invent values. If a field is not legible or not present, return null for it. Return ONLY a single JSON object, no prose, no markdown fences.`;
+const SYSTEM = `You are an expert facilities-asset data extractor for UCSF. You read photographs of equipment — asset tags, nameplates, stickers, and close-ups of sub-components — and return exhaustive, structured data.
 
-function userPromptText() {
-  return `Extract the fields below from the attached photos of ONE asset.
+Rules:
+- Extract EVERYTHING legible. Do not summarize away detail. Every readable spec belongs in the output.
+- Never invent or guess a value. If something is not legible or not present, use null. Do not fill a field from general knowledge.
+- Identify what the asset physically IS by looking at it (e.g. "Rooftop Air Handling Unit", "Fire Alarm Pull Station", "Centrifugal Pump"), even when there is no tag.
+- Distinguish the PARENT asset (the main unit) from SUB-COMPONENTS (a motor, VFD, valve, board, sensor, compressor, etc. that has its own nameplate). Each sub-component with its own plate becomes an entry in "components" with its own manufacturer/model/serial/specs.
+- Put any spec that does not have a dedicated field into the "attributes" object as label→value pairs (e.g. "Voltage": "480V", "Phase": "3", "FLA": "12.4", "Capacity": "5 tons", "Refrigerant": "R-410A", "RPM": "1750"). Use clear, consistent labels.
+- Use the field technician's notes as an additional source: they may contain the room/location or a description that is not on any plate. Reconcile but never overwrite something you can clearly read in a photo.
+Return ONLY a single JSON object — no prose, no markdown fences.`;
 
-The first image (if present) is the UCSF ASSET TAG. A UCSF tag typically shows, on separate lines:
+function userPromptText(notes) {
+  const noteBlock = notes && notes.trim()
+    ? `\n\nFIELD TECHNICIAN NOTES for this asset (may contain the room/location or a description not printed on any plate — use them):\n"""\n${notes.trim()}\n"""\n`
+    : '\n\n(No field technician notes were recorded for this asset.)\n';
+
+  return `Extract ALL asset information from the attached photos of ONE asset.
+
+If a UCSF ASSET TAG is present it typically shows, on separate lines:
 - an asset number (short, e.g. "C4496"; a QR code on the tag may encode it as "=c4496")
 - a PMItem ID (e.g. "MSB-ESP-PA11B2")
 - a description (e.g. "Electrical Sub Panel")
 - a location code (e.g. "2252-11-1122")
 
-The remaining images are NAMEPLATE/STICKER photos of the equipment, or SUB-COMPONENT/PART photos (a specific part or sub-assembly such as a motor, valve, board, or sensor). Read manufacturer, model, serial number, and installation date wherever visible across all of them.
+If there is NO tag, identify the asset from the equipment itself and read every visible nameplate and sticker.
 
-Return exactly this JSON shape (use null for anything you cannot read):
+Read manufacturer, model, serial, dates, and every electrical/capacity/rating spec you can see across ALL images. Treat each distinct nameplate as potentially a different physical component.
+${noteBlock}
+Return exactly this JSON shape. Use null for anything you cannot read. "attributes" and "components" may be empty ({} and []) but must be present:
 {
+  "asset_type": string|null,          // what the asset physically is, identified visually
   "asset_num": string|null,
   "pmitem_id": string|null,
-  "description": string|null,
-  "tag_location": string|null,
-  "manufacturer": string|null,
+  "description": string|null,         // best short description (from tag, plate, or your visual ID)
+  "tag_location": string|null,        // location code read off the tag, if any
+  "manufacturer": string|null,        // the PARENT / main unit
   "model": string|null,
   "serial": string|null,
   "install_date": string|null,
-  "other": string|null,
-  "confidence": "high"|"medium"|"low"
-}
-"other" = any additional useful text you saw (voltage, capacity, warnings) as a short string. "confidence" = your overall read confidence for the tag fields.`;
+  "manufacture_date": string|null,
+  "attributes": { "<label>": "<value>" },   // every other spec on the MAIN asset
+  "components": [                             // one entry per sub-component with its own plate
+    {
+      "name": string,                        // e.g. "Supply fan motor", "VFD", "Compressor 1"
+      "manufacturer": string|null,
+      "model": string|null,
+      "serial": string|null,
+      "install_date": string|null,
+      "attributes": { "<label>": "<value>" },
+      "notes": string|null
+    }
+  ],
+  "notes_extracted": string|null,      // useful info you took from the field technician notes (e.g. a room not on any plate)
+  "readability": string|null,          // brief note on anything blurry/cut off/unreadable
+  "confidence": "high"|"medium"|"low"  // overall read confidence
+}`;
 }
 
 // ---- main -----------------------------------------------------------
@@ -139,8 +180,9 @@ async function main() {
   }
   console.log(`Packets to process: ${packets.length}\n`);
 
-  const rows = [];
-  let tagThumbs = []; // { rowIndex, buffer } for embedding
+  const assetRows = [];       // one per packet
+  const componentRows = [];   // one per sub-component
+  const tagThumbs = [];       // { rowIndex, buffer } for embedding
 
   for (let i = 0; i < packets.length; i++) {
     const p = packets[i];
@@ -150,52 +192,67 @@ async function main() {
       const photos = await getPhotos(p.id);
       if (photos.length === 0) {
         console.log('no photos, skipped');
-        rows.push(baseRow(p, { error: 'no photos' }));
+        assetRows.push(baseRow(p, { error: 'no photos' }));
         continue;
       }
 
       // Order: tag first, then nameplates, then sub-components/parts, then
-      // others; cap total images.
+      // others. NO cap — send every photo (guarded only by a high ceiling).
       const tag = photos.find((x) => x.photo_type === 'tag');
       const plates = photos.filter((x) => x.photo_type === 'nameplate');
       const components = photos.filter((x) => x.photo_type === 'component');
       const others = photos.filter((x) => x.photo_type === 'other');
       const ordered = [tag, ...plates, ...components, ...others]
         .filter(Boolean)
-        .slice(0, 1 + MAX_EXTRA);
+        .slice(0, HARD_IMAGE_CEILING);
 
       const images = [];
       for (const ph of ordered) {
         const bytes = await download(ph.storage_path);
-        if (bytes) images.push({ b64: bytes.toString('base64'), path: ph.storage_path });
+        if (bytes) {
+          images.push({
+            b64: bytes.toString('base64'),
+            media_type: mimeForPath(ph.storage_path),
+            path: ph.storage_path,
+          });
+        }
       }
       if (images.length === 0) {
         console.log('download failed, skipped');
-        rows.push(baseRow(p, { error: 'photo download failed' }));
+        assetRows.push(baseRow(p, { error: 'photo download failed' }));
         continue;
       }
 
-      const extracted = await extract(images);
-      rows.push(baseRow(p, extracted));
+      const extracted = await extract(images, p.notes);
+      assetRows.push(baseRow(p, extracted));
 
-      // Keep the tag thumbnail for the sheet.
-      if (tag) {
-        const tb = await download(tag.storage_path);
-        if (tb) tagThumbs.push({ rowIndex: rows.length - 1, buffer: tb });
+      // Fan out sub-components into their own rows.
+      const comps = Array.isArray(extracted.components) ? extracted.components : [];
+      for (const c of comps) {
+        componentRows.push(componentRow(p, extracted, c));
+      }
+
+      // Keep a thumbnail for the sheet — tag if present, else the first photo.
+      const thumbSrc = tag || ordered[0];
+      if (thumbSrc) {
+        const tb = await download(thumbSrc.storage_path);
+        if (tb) tagThumbs.push({ rowIndex: assetRows.length - 1, buffer: tb });
       }
 
       console.log(
-        `ok (asset=${extracted.asset_num ?? '—'}, tagLoc=${extracted.tag_location ?? '—'}, conf=${extracted.confidence ?? '—'})`,
+        `ok (type=${extracted.asset_type ?? '—'}, asset=${extracted.asset_num ?? '—'}, comps=${comps.length}, imgs=${images.length}, conf=${extracted.confidence ?? '—'})`,
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.log(`FAILED: ${msg}`);
-      rows.push(baseRow(p, { error: msg }));
+      assetRows.push(baseRow(p, { error: msg }));
     }
   }
 
-  await writeSheet(rows, tagThumbs, OUT);
-  console.log(`\nWrote ${rows.length} rows → ${OUT}`);
+  await writeSheet(assetRows, componentRows, tagThumbs, OUT);
+  console.log(
+    `\nWrote ${assetRows.length} asset rows + ${componentRows.length} component rows → ${OUT}`,
+  );
 }
 
 async function getPhotos(packetId) {
@@ -215,18 +272,26 @@ async function download(path) {
   return Buffer.from(ab);
 }
 
-async function extract(images) {
-  const content = [{ type: 'text', text: userPromptText() }];
+function mimeForPath(path) {
+  const ext = (path || '').toLowerCase().split('.').pop();
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'gif') return 'image/gif';
+  return 'image/jpeg';
+}
+
+async function extract(images, notes) {
+  const content = [{ type: 'text', text: userPromptText(notes) }];
   for (const img of images) {
     content.push({
       type: 'image',
-      source: { type: 'base64', media_type: 'image/jpeg', data: img.b64 },
+      source: { type: 'base64', media_type: img.media_type, data: img.b64 },
     });
   }
 
   const resp = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 1024,
+    max_tokens: 4096,
     system: SYSTEM,
     messages: [{ role: 'user', content }],
   });
@@ -249,7 +314,7 @@ function parseJson(text) {
   try {
     return JSON.parse(t);
   } catch {
-    return { error: `unparseable model output: ${text.slice(0, 120)}` };
+    return { error: `unparseable model output: ${text.slice(0, 160)}` };
   }
 }
 
@@ -258,15 +323,26 @@ function normLoc(s) {
   return (s || '').toString().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
+// Flatten an attributes object into a readable "k: v; k: v" string.
+function specsString(attrs) {
+  if (!attrs || typeof attrs !== 'object') return '';
+  return Object.entries(attrs)
+    .filter(([, v]) => v != null && String(v).trim() !== '')
+    .map(([k, v]) => `${k}: ${v}`)
+    .join('; ');
+}
+
 function baseRow(p, ex) {
   const formLoc = p.location_code || '';
   const tagLoc = ex.tag_location || '';
   const match =
     !formLoc || !tagLoc ? '' : normLoc(formLoc) === normLoc(tagLoc) ? 'match' : 'MISMATCH';
+  const comps = Array.isArray(ex.components) ? ex.components : [];
   return {
     packet_id: p.id,
     captured_at: p.captured_at ? new Date(p.captured_at).toLocaleString() : '',
     tech: p.tech_name || '',
+    asset_type: ex.asset_type ?? '',
     form_location: formLoc,
     tag_location: tagLoc,
     location_match: match,
@@ -278,68 +354,134 @@ function baseRow(p, ex) {
     model: ex.model ?? '',
     serial: ex.serial ?? '',
     install_date: ex.install_date ?? '',
-    other: ex.other ?? '',
+    manufacture_date: ex.manufacture_date ?? '',
+    component_count: comps.length || '',
+    notes_field: p.notes || '',
+    notes_extracted: ex.notes_extracted ?? '',
+    readability: ex.readability ?? '',
     confidence: ex.confidence ?? '',
-    packet_notes: p.notes || '',
     error: ex.error || '',
+    // dynamic attribute columns are merged in later, keyed 'attr::<label>'
+    _attributes: ex.attributes && typeof ex.attributes === 'object' ? ex.attributes : {},
+  };
+}
+
+function componentRow(p, ex, c) {
+  return {
+    packet_id: p.id,
+    parent_asset_num: ex.asset_num ?? '',
+    parent_asset_type: ex.asset_type ?? '',
+    parent_description: ex.description ?? '',
+    component_name: c.name ?? '',
+    manufacturer: c.manufacturer ?? '',
+    model: c.model ?? '',
+    serial: c.serial ?? '',
+    install_date: c.install_date ?? '',
+    specs: specsString(c.attributes),
+    notes: c.notes ?? '',
   };
 }
 
 // ---- spreadsheet ----------------------------------------------------
 
-const COLUMNS = [
+const ASSET_COLUMNS = [
   { header: 'Packet ID', key: 'packet_id', width: 24 },
   { header: 'Captured', key: 'captured_at', width: 20 },
   { header: 'Tech', key: 'tech', width: 16 },
+  { header: 'Asset type', key: 'asset_type', width: 24 },
   { header: 'Form location', key: 'form_location', width: 16 },
   { header: 'Tag location', key: 'tag_location', width: 16 },
   { header: 'Location match', key: 'location_match', width: 14 },
   { header: 'Asset #', key: 'asset_num', width: 12 },
   { header: 'Scanned asset #', key: 'scanned_asset_num', width: 14 },
   { header: 'PMItem ID', key: 'pmitem_id', width: 18 },
-  { header: 'Description', key: 'description', width: 24 },
+  { header: 'Description', key: 'description', width: 26 },
   { header: 'Manufacturer', key: 'manufacturer', width: 18 },
   { header: 'Model', key: 'model', width: 16 },
   { header: 'Serial', key: 'serial', width: 18 },
   { header: 'Install date', key: 'install_date', width: 14 },
-  { header: 'Other', key: 'other', width: 24 },
+  { header: 'Mfr date', key: 'manufacture_date', width: 14 },
+  { header: '# Sub-components', key: 'component_count', width: 15 },
+  { header: 'Notes (field)', key: 'notes_field', width: 26 },
+  { header: 'Notes (from AI)', key: 'notes_extracted', width: 26 },
+  { header: 'Readability', key: 'readability', width: 22 },
   { header: 'Confidence', key: 'confidence', width: 12 },
-  { header: 'Notes', key: 'packet_notes', width: 24 },
   { header: 'Extraction error', key: 'error', width: 22 },
-  { header: 'Tag photo', key: 'tag_photo', width: 22 },
+  { header: 'Tag/first photo', key: 'tag_photo', width: 22 },
 ];
 
-async function writeSheet(rows, tagThumbs, outPath) {
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('Review');
-  ws.columns = COLUMNS;
+const COMPONENT_COLUMNS = [
+  { header: 'Packet ID', key: 'packet_id', width: 24 },
+  { header: 'Parent asset #', key: 'parent_asset_num', width: 14 },
+  { header: 'Parent type', key: 'parent_asset_type', width: 22 },
+  { header: 'Parent description', key: 'parent_description', width: 24 },
+  { header: 'Component', key: 'component_name', width: 22 },
+  { header: 'Manufacturer', key: 'manufacturer', width: 18 },
+  { header: 'Model', key: 'model', width: 16 },
+  { header: 'Serial', key: 'serial', width: 18 },
+  { header: 'Install date', key: 'install_date', width: 14 },
+  { header: 'Specs', key: 'specs', width: 44 },
+  { header: 'Notes', key: 'notes', width: 24 },
+];
 
-  // Header styling + freeze.
-  ws.getRow(1).font = { bold: true };
-  ws.getRow(1).alignment = { vertical: 'middle' };
+const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F3864' } };
+const HEADER_FONT = { bold: true, color: { argb: 'FFFFFFFF' } };
+
+async function writeSheet(assetRows, componentRows, tagThumbs, outPath) {
+  const wb = new ExcelJS.Workbook();
+
+  // ---- Assets sheet, with dynamic attribute columns -----------------
+  const ws = wb.addWorksheet('Assets');
+
+  // Union of every attribute label seen, so each spec gets its own column.
+  const attrLabels = [];
+  const seen = new Set();
+  for (const r of assetRows) {
+    for (const label of Object.keys(r._attributes || {})) {
+      if (!seen.has(label)) {
+        seen.add(label);
+        attrLabels.push(label);
+      }
+    }
+  }
+  attrLabels.sort((a, b) => a.localeCompare(b));
+
+  const dynamicCols = attrLabels.map((label) => ({
+    header: label,
+    key: `attr::${label}`,
+    width: 16,
+  }));
+
+  // Tag photo must stay the last column; insert dynamic cols before it.
+  const fixed = ASSET_COLUMNS.slice(0, -1);
+  const photoCol = ASSET_COLUMNS[ASSET_COLUMNS.length - 1];
+  ws.columns = [...fixed, ...dynamicCols, photoCol];
+
+  styleHeader(ws.getRow(1));
   ws.views = [{ state: 'frozen', ySplit: 1 }];
 
-  rows.forEach((r) => {
-    const row = ws.addRow(r);
+  assetRows.forEach((r) => {
+    const flat = { ...r };
+    for (const [label, val] of Object.entries(r._attributes || {})) {
+      flat[`attr::${label}`] = val == null ? '' : String(val);
+    }
+    delete flat._attributes;
+    const row = ws.addRow(flat);
     row.alignment = { vertical: 'top', wrapText: true };
-    // Highlight location mismatches so the eye lands on them.
     if (r.location_match === 'MISMATCH') {
-      row.getCell('location_match').fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFF6C6C6' },
-      };
-      row.getCell('location_match').font = { bold: true, color: { argb: 'FF9B1C1C' } };
+      const cell = row.getCell('location_match');
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF6C6C6' } };
+      cell.font = { bold: true, color: { argb: 'FF9B1C1C' } };
     } else if (r.location_match === 'match') {
       row.getCell('location_match').font = { color: { argb: 'FF15803D' } };
     }
-    if (r.error) {
-      row.getCell('error').font = { color: { argb: 'FF9B1C1C' } };
-    }
+    if (r.error) row.getCell('error').font = { color: { argb: 'FF9B1C1C' } };
   });
 
-  // Embed tag thumbnails in the last column.
-  const tagCol = COLUMNS.findIndex((c) => c.key === 'tag_photo'); // 0-based
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: ws.columnCount } };
+
+  // Embed thumbnails in the last (photo) column.
+  const tagCol = ws.columnCount - 1; // 0-based index of last column
   for (const t of tagThumbs) {
     const imgId = wb.addImage({ buffer: t.buffer, extension: 'jpeg' });
     const excelRow = t.rowIndex + 1; // +1 header offset, 0-based tl anchor
@@ -351,8 +493,27 @@ async function writeSheet(rows, tagThumbs, outPath) {
     });
   }
 
+  // ---- Components sheet ---------------------------------------------
+  const cs = wb.addWorksheet('Components');
+  cs.columns = COMPONENT_COLUMNS;
+  styleHeader(cs.getRow(1));
+  cs.views = [{ state: 'frozen', ySplit: 1 }];
+  componentRows.forEach((r) => {
+    const row = cs.addRow(r);
+    row.alignment = { vertical: 'top', wrapText: true };
+  });
+  cs.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cs.columnCount } };
+
   const buf = await wb.xlsx.writeBuffer();
   writeFileSync(outPath, Buffer.from(buf));
+}
+
+function styleHeader(row) {
+  row.font = HEADER_FONT;
+  row.alignment = { vertical: 'middle' };
+  row.eachCell((cell) => {
+    cell.fill = HEADER_FILL;
+  });
 }
 
 main().catch((e) => {
