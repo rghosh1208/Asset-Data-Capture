@@ -509,8 +509,8 @@ export default function CapturePage() {
       <circle cx="12" cy="13" r="4" />
     </svg>
   </div>
-  <h3>Tap to start a capture</h3>
-  <p>Set the location, then shoot the tag.<br />Add nameplates and save.</p>
+  <h3>No captures yet</h3>
+  <p>Choose an option below:<br />an asset with a tag, or one with no tag.</p>
 </button>
             ) : (
               <ul style={{ listStyle: 'none', padding: 0, margin: 0 }} aria-label="Captured packets">
@@ -555,15 +555,15 @@ export default function CapturePage() {
           </main>
 
           <div className="action-bar" role="region" aria-label="Actions">
-            <div className="action-bar-inner">
-              <button className="btn btn-ghost" onClick={syncNow} aria-label="Sync pending packets to server">
-                <SyncIcon /> Sync
+            <div className="action-bar-inner action-bar-stack">
+              <button className="btn btn-primary btn-block" onClick={() => startNewPacket(false)} aria-label="Capture an existing asset that has a UCSF asset tag">
+                <TagIcon /> Existing Asset with Asset Tag
               </button>
-              <button className="btn btn-ghost" onClick={() => startNewPacket(true)} aria-label="Add a new asset that has no tag">
-                <TagOffIcon /> No tag
+              <button className="btn btn-secondary btn-block" onClick={() => startNewPacket(true)} aria-label="Capture an asset that has no tag">
+                <TagOffIcon /> Asset with no Tag
               </button>
-              <button className="btn btn-primary" onClick={() => startNewPacket()} aria-label="Start capturing a new asset">
-                <PlusIcon /> New Asset
+              <button className="btn btn-ghost btn-block sm" onClick={syncNow} aria-label="Sync pending packets to server">
+                <SyncIcon /> Sync{stats.pending ? ` · ${stats.pending} pending` : ''}
               </button>
             </div>
           </div>
@@ -1108,14 +1108,6 @@ function BuildingCombo({
 
 // ---- Icons -----------------------------------------------------------
 
-function PlusIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  );
-}
 function CheckIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

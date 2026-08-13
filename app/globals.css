@@ -318,6 +318,8 @@ button, a { font-family: inherit; }
   max-width: 480px; margin: 0 auto;
   display: flex; gap: 10px;
 }
+.action-bar-stack { flex-direction: column; }
+.btn-block { width: 100%; flex: none; }
 .btn {
   border: 1px solid var(--border);
   background: var(--bg-elev);
