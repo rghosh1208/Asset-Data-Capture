@@ -4,7 +4,7 @@
 // fall back to cache. Photo uploads go through normal fetch — when
 // offline they fail and the queue retries.
 
-const CACHE_NAME = 'asset-capture-v8';
+const CACHE_NAME = 'asset-capture-v9';
 const APP_SHELL = ['/', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
