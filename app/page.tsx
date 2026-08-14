@@ -500,9 +500,9 @@ export default function CapturePage() {
             <div className="home-hero">
               <p className="home-prompt">What are you capturing?</p>
               <div className="option-grid">
-                <button className="option-card" onClick={() => startNewPacket(false)} aria-label="Capture an existing asset that has a UCSF asset tag">
+                <button className="option-card" onClick={() => startNewPacket(false)} aria-label="Capture an asset that has a UCSF asset tag">
                   <TagIcon />
-                  <span>Existing Asset with Asset Tag</span>
+                  <span>Asset with Asset Tag</span>
                 </button>
                 <button className="option-card" onClick={() => startNewPacket(true)} aria-label="Capture an asset that has no tag">
                   <TagOffIcon />
