@@ -61,6 +61,9 @@ export default function CapturePage() {
   const [view, setView] = useState<View>('home');
   const [tech, setTech] = useState<string | null>(null);
   const [techModal, setTechModal] = useState(false);
+  // Remembers which option (tagged / no tag) the user tapped before being asked
+  // for their name, so we can drop them straight into that flow afterwards.
+  const [pendingNoTag, setPendingNoTag] = useState<boolean | null>(null);
   const [packets, setPackets] = useState<Array<LocalPacket & { tagThumbUrl?: string; photoCount: number }>>([]);
   const [stats, setStats] = useState({ packets: 0, photos: 0, pending: 0 });
   const [online, setOnline] = useState(true);
@@ -137,6 +140,12 @@ export default function CapturePage() {
     setTech(name);
     await setSetting('tech', name);
     setTechModal(false);
+    // If they got here by tapping a capture option, continue into that flow.
+    if (pendingNoTag !== null) {
+      const noTag = pendingNoTag;
+      setPendingNoTag(null);
+      await beginCapture(noTag);
+    }
   }
 
   // Location carries over from the last packet — consecutive assets are
@@ -148,9 +157,14 @@ export default function CapturePage() {
 
   async function startNewPacket(noTag = false) {
     if (!tech) {
+      setPendingNoTag(noTag);
       setTechModal(true);
       return;
     }
+    await beginCapture(noTag);
+  }
+
+  async function beginCapture(noTag: boolean) {
     const id = newPacketId();
     setBlurWarn(false);
     setDraft({
@@ -811,7 +825,7 @@ export default function CapturePage() {
       {/* ====== TECH MODAL ====== */}
       <div
   className={`modal-backdrop ${techModal ? 'active' : ''}`}
-  onClick={(e) => { if (e.target === e.currentTarget) setTechModal(false); }}
+  onClick={(e) => { if (e.target === e.currentTarget) { setTechModal(false); setPendingNoTag(null); } }}
   role="dialog"
   aria-modal="true"
   aria-labelledby="tech-modal-title"
@@ -845,7 +859,7 @@ export default function CapturePage() {
         Save name
       </button>
     </form>
-    <button className="btn btn-ghost" style={{ width: '100%', marginTop: 8 }} onClick={() => setTechModal(false)}>
+    <button className="btn btn-ghost" style={{ width: '100%', marginTop: 8 }} onClick={() => { setTechModal(false); setPendingNoTag(null); }}>
       Cancel
     </button>
   </div>
