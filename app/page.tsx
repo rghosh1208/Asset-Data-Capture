@@ -28,7 +28,7 @@ import {
 } from '@/lib/queue';
 import { startAutoSync, syncAllPending } from '@/lib/sync';
 
-type View = 'home' | 'capture' | 'detail';
+type View = 'home' | 'list' | 'capture' | 'detail';
 
 interface DraftPhoto {
   id: string;
@@ -486,35 +486,69 @@ export default function CapturePage() {
             </button>
           </header>
 
-          <div className="stats" role="group" aria-label="Capture statistics">
-            <div className="stat">
-              <div className="stat-num" aria-label={`${stats.packets} captured today`}>{stats.packets}</div>
-              <div className="stat-label">Captured</div>
+          <main className="home-main" role="main">
+            <button
+              className="captured-summary"
+              onClick={() => setView('list')}
+              aria-label={`${stats.packets} captured. Tap to view the list.`}
+            >
+              <span className="cs-num">{stats.packets}</span>
+              <span className="cs-label">Captured</span>
+              <span className="cs-view">View <ChevronRightIcon /></span>
+            </button>
+
+            <div className="home-hero">
+              <p className="home-prompt">What are you capturing?</p>
+              <div className="option-grid">
+                <button className="option-card" onClick={() => startNewPacket(false)} aria-label="Capture an existing asset that has a UCSF asset tag">
+                  <TagIcon />
+                  <span>Existing Asset with Asset Tag</span>
+                </button>
+                <button className="option-card" onClick={() => startNewPacket(true)} aria-label="Capture an asset that has no tag">
+                  <TagOffIcon />
+                  <span>Asset with no Tag</span>
+                </button>
+              </div>
             </div>
-            <div className="stat">
-              <div className="stat-num" aria-label={`${stats.photos} photos total`}>{stats.photos}</div>
-              <div className="stat-label">Photos</div>
-            </div>
-            <div className="stat">
-              <div className="stat-num" aria-label={`${stats.pending} pending upload`}>{stats.pending}</div>
-              <div className="stat-label">Pending</div>
+          </main>
+
+          <div className="action-bar" role="region" aria-label="Sync">
+            <div className="action-bar-inner action-bar-stack">
+              {stats.pending > 0 && (
+                <p className="pending-note" aria-live="polite">
+                  {stats.pending} packet{stats.pending === 1 ? '' : 's'} waiting to upload
+                </p>
+              )}
+              <button className="btn btn-ghost btn-block sm" onClick={syncNow} aria-label="Sync pending packets to server">
+                <SyncIcon /> Sync{stats.pending ? ` · ${stats.pending} pending` : ''}
+              </button>
             </div>
           </div>
+        </>
+      )}
 
-          <main className="content" role="main">
-            <div className="section-label">
-              <span>Captured packets</span>
+      {/* ====== LIST ====== */}
+      {view === 'list' && (
+        <>
+          <header className="capture-header" role="banner">
+            <button className="back-btn" onClick={() => setView('home')} aria-label="Back to home">
+              <ChevronIcon />
+            </button>
+            <div className="capture-title">
+              <h2>Captured packets</h2>
               <span className="online-indicator" aria-live="polite">
                 <span className={`online-dot ${online ? 'up' : 'down'}`} aria-hidden="true" />
                 <span>{online ? 'Online' : 'Offline'}</span>
               </span>
             </div>
+          </header>
 
+          <main className="content" role="main">
             {packets.length === 0 ? (
               <div className="empty">
-  <h3>No captures yet</h3>
-  <p>Choose an option below:<br />an asset with a tag, or one with no tag.</p>
-</div>
+                <h3>No captures yet</h3>
+                <p>Head back and choose an option to start.</p>
+              </div>
             ) : (
               <ul style={{ listStyle: 'none', padding: 0, margin: 0 }} aria-label="Captured packets">
                 {packets.map((p) => (
@@ -522,14 +556,14 @@ export default function CapturePage() {
                     <button
                       className="packet"
                       onClick={() => openDetail(p)}
-                      aria-label={`Packet ${p.scannedAssetNum ?? 'pending OCR'} captured at ${fmtTime(p.capturedAt)} by ${p.techName}, ${p.photoCount} photos, status ${p.status}`}
+                      aria-label={`Packet ${p.scannedAssetNum ?? (p.noTag ? 'untagged asset' : 'pending OCR')} captured at ${fmtTime(p.capturedAt)} by ${p.techName}, ${p.photoCount} photos, status ${p.status}`}
                       style={{ width: '100%', textAlign: 'left', font: 'inherit' }}
                     >
                       <div className="packet-row">
                         <div className="packet-thumb">
                           {p.tagThumbUrl
                             ? <img src={p.tagThumbUrl} alt="" />
-                            : <span className="placeholder" aria-hidden="true">?</span>}
+                            : <span className="placeholder" aria-hidden="true">{p.noTag ? <TagOffIcon /> : <TagIcon />}</span>}
                         </div>
                         <div className="packet-info">
                           <div className={`packet-id ${p.scannedAssetNum ? '' : 'unknown'}`}>
@@ -556,24 +590,6 @@ export default function CapturePage() {
               </ul>
             )}
           </main>
-
-          <div className="action-bar" role="region" aria-label="Actions">
-            <div className="action-bar-inner action-bar-stack">
-              <div className="option-grid">
-                <button className="option-card" onClick={() => startNewPacket(false)} aria-label="Capture an existing asset that has a UCSF asset tag">
-                  <TagIcon />
-                  <span>Existing Asset with Asset Tag</span>
-                </button>
-                <button className="option-card" onClick={() => startNewPacket(true)} aria-label="Capture an asset that has no tag">
-                  <TagOffIcon />
-                  <span>Asset with no Tag</span>
-                </button>
-              </div>
-              <button className="btn btn-ghost btn-block sm" onClick={syncNow} aria-label="Sync pending packets to server">
-                <SyncIcon /> Sync{stats.pending ? ` · ${stats.pending} pending` : ''}
-              </button>
-            </div>
-          </div>
         </>
       )}
 
@@ -1126,6 +1142,13 @@ function ChevronIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="15 18 9 12 15 6" />
+    </svg>
+  );
+}
+function ChevronRightIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="9 18 15 12 9 6" />
     </svg>
   );
 }

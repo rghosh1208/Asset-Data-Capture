@@ -344,6 +344,46 @@ button, a { font-family: inherit; }
 .option-card:active { transform: scale(0.98); }
 .option-card:hover { border-color: var(--ucsf-teal); color: var(--ucsf-teal-2); }
 .option-card svg { width: 26px; height: 26px; flex: none; }
+
+/* ---- Home layout: cards are the hero ---- */
+.home-main {
+  flex: 1;
+  display: flex; flex-direction: column;
+  max-width: 480px; width: 100%;
+  margin: 0 auto; padding: 16px;
+  gap: 16px;
+}
+.captured-summary {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-family: inherit; cursor: pointer;
+  transition: border-color 0.15s;
+}
+.captured-summary:hover { border-color: var(--ucsf-teal); }
+.captured-summary .cs-num { font-size: 24px; font-weight: 800; color: var(--ucsf-navy); line-height: 1; }
+.captured-summary .cs-label { font-size: var(--fs-lg); font-weight: 600; }
+.captured-summary .cs-view {
+  margin-left: auto; display: flex; align-items: center; gap: 4px;
+  color: var(--text-dim); font-size: var(--fs-sm); font-weight: 600;
+}
+.home-hero {
+  flex: 1;
+  display: flex; flex-direction: column; justify-content: center;
+  gap: 12px;
+}
+.home-prompt {
+  margin: 0; text-align: center;
+  color: var(--text-dim); font-size: var(--fs-lg); font-weight: 600;
+}
+.pending-note {
+  margin: 0 0 2px; text-align: center;
+  color: var(--warn-text, #8a6d00); font-size: var(--fs-sm); font-weight: 600;
+}
+.packet-thumb .placeholder svg { width: 20px; height: 20px; color: var(--text-dim); }
 .btn {
   border: 1px solid var(--border);
   background: var(--bg-elev);
