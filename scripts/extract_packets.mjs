@@ -57,6 +57,10 @@ const HARD_IMAGE_CEILING = 40;
 // ---- args ----
 const argv = process.argv.slice(2);
 const ALL = argv.includes('--all');
+// After a packet is successfully extracted we mark it 'extracted' in Supabase
+// so the next plain run skips it. Pass --no-mark to leave statuses untouched
+// (e.g. a dry run you don't want to affect future "new only" runs).
+const NO_MARK = argv.includes('--no-mark');
 const LIMIT = intArg('--limit');
 const OUT =
   strArg('--out') ||
@@ -232,6 +236,10 @@ async function main() {
         componentRows.push(componentRow(p, extracted, c));
       }
 
+      // Mark this packet done so the next plain run skips it. Only on a clean
+      // extraction — failures stay unmarked and get retried next time.
+      if (!extracted.error) await markExtracted(p.id);
+
       // Keep a thumbnail for the sheet — tag if present, else the first photo.
       const thumbSrc = tag || ordered[0];
       if (thumbSrc) {
@@ -270,6 +278,16 @@ async function download(path) {
   if (error || !data) return null;
   const ab = await data.arrayBuffer();
   return Buffer.from(ab);
+}
+
+// Flag a packet as extracted so subsequent plain runs (without --all) skip it.
+async function markExtracted(id) {
+  if (NO_MARK) return;
+  const { error } = await sb
+    .from('capture_packet')
+    .update({ extraction_status: 'extracted' })
+    .eq('id', id);
+  if (error) process.stdout.write(`(mark failed: ${error.message}) `);
 }
 
 function mimeForPath(path) {
