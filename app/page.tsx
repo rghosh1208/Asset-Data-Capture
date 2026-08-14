@@ -545,12 +545,16 @@ export default function CapturePage() {
 
           <div className="action-bar" role="region" aria-label="Actions">
             <div className="action-bar-inner action-bar-stack">
-              <button className="btn btn-primary btn-block" onClick={() => startNewPacket(false)} aria-label="Capture an existing asset that has a UCSF asset tag">
-                <TagIcon /> Existing Asset with Asset Tag
-              </button>
-              <button className="btn btn-secondary btn-block" onClick={() => startNewPacket(true)} aria-label="Capture an asset that has no tag">
-                <TagOffIcon /> Asset with no Tag
-              </button>
+              <div className="option-grid">
+                <button className="option-card" onClick={() => startNewPacket(false)} aria-label="Capture an existing asset that has a UCSF asset tag">
+                  <TagIcon />
+                  <span>Existing Asset with Asset Tag</span>
+                </button>
+                <button className="option-card" onClick={() => startNewPacket(true)} aria-label="Capture an asset that has no tag">
+                  <TagOffIcon />
+                  <span>Asset with no Tag</span>
+                </button>
+              </div>
               <button className="btn btn-ghost btn-block sm" onClick={syncNow} aria-label="Sync pending packets to server">
                 <SyncIcon /> Sync{stats.pending ? ` · ${stats.pending} pending` : ''}
               </button>

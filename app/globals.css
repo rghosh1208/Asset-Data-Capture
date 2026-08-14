@@ -320,6 +320,30 @@ button, a { font-family: inherit; }
 }
 .action-bar-stack { flex-direction: column; }
 .btn-block { width: 100%; flex: none; }
+
+/* ---- Two equal option cards (tagged / no tag) ---- */
+.option-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.option-card {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 10px; text-align: center;
+  padding: 18px 12px; min-height: 116px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-family: inherit; font-weight: 600; font-size: var(--fs-lg);
+  line-height: 1.2;
+  cursor: pointer;
+  transition: transform 0.05s, border-color 0.15s;
+}
+.option-card:active { transform: scale(0.98); }
+.option-card:hover { border-color: var(--ucsf-teal); color: var(--ucsf-teal-2); }
+.option-card svg { width: 26px; height: 26px; flex: none; }
 .btn {
   border: 1px solid var(--border);
   background: var(--bg-elev);
