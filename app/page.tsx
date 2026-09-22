@@ -27,6 +27,11 @@ import {
   type PhotoType,
 } from '@/lib/queue';
 import { startAutoSync, syncAllPending } from '@/lib/sync';
+import {
+  searchAssetClasses,
+  getAssetClass,
+  type AssetClass,
+} from '@/lib/assetClasses';
 
 type View = 'home' | 'list' | 'capture' | 'detail';
 
@@ -55,6 +60,9 @@ interface Draft {
   location: DraftLocation;
   notes: string;
   noTag: boolean;        // true = asset has no UCSF tag; captured by photos only
+  assetClass?: string;              // UniFormat class code (untagged flow only)
+  assetClassDesc?: string;          // human description of the class
+  assetAttributes?: Record<string, string>; // class specs the tech filled in
 }
 
 export default function CapturePage() {
@@ -296,6 +304,32 @@ export default function CapturePage() {
     setDraft((prev) => (prev ? { ...prev, location: { ...prev.location, ...patch } } : prev));
   }
 
+  // ---- Asset class + attributes (untagged flow) ----
+  function selectAssetClass(code: string) {
+    const cls = getAssetClass(code);
+    setDraft((prev) =>
+      prev
+        ? { ...prev, assetClass: code, assetClassDesc: cls?.description, assetAttributes: {} }
+        : prev,
+    );
+  }
+  function clearAssetClass() {
+    setDraft((prev) =>
+      prev
+        ? { ...prev, assetClass: undefined, assetClassDesc: undefined, assetAttributes: undefined }
+        : prev,
+    );
+  }
+  function setAssetAttr(id: string, value: string) {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      const next = { ...(prev.assetAttributes || {}) };
+      if (value) next[id] = value;
+      else delete next[id];
+      return { ...prev, assetAttributes: next };
+    });
+  }
+
   const [saving, setSaving] = useState(false);
 
   async function savePacketLocal(thenStartNext: boolean) {
@@ -342,6 +376,12 @@ export default function CapturePage() {
         locationCode: locationCode || undefined,
         tagSharpness: tagPhoto?.sharpness,
         noTag: draft.noTag || undefined,
+        assetClass: draft.assetClass || undefined,
+        assetClassDesc: draft.assetClassDesc || undefined,
+        assetAttributes:
+          draft.assetAttributes && Object.keys(draft.assetAttributes).length > 0
+            ? draft.assetAttributes
+            : undefined,
         notes: notesRef.current?.value || '',
         status: 'pending',
       };
@@ -746,6 +786,16 @@ export default function CapturePage() {
                   aria-label="Capture sub-component or part photo"
                 />
 
+                {isNoTag && (
+                  <AssetClassSection
+                    code={draft.assetClass}
+                    values={draft.assetAttributes || {}}
+                    onSelect={selectAssetClass}
+                    onClear={clearAssetClass}
+                    onAttr={setAssetAttr}
+                  />
+                )}
+
                 <div className="notes-section">
                   <div className="notes-head">
                     <label htmlFor="capture-notes">Notes (optional)</label>
@@ -1123,6 +1173,132 @@ function BuildingCombo({
         className="link-btn"
         onClick={() => setOpen(false)}
       >
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+// Asset class picker + its class-specific attribute fields (untagged flow).
+// The class is searchable by plain description; once chosen, every attribute
+// that Maximo defines for that class shows as an OPTIONAL field to fill.
+function AssetClassSection({
+  code,
+  values,
+  onSelect,
+  onClear,
+  onAttr,
+}: {
+  code?: string;
+  values: Record<string, string>;
+  onSelect: (code: string) => void;
+  onClear: () => void;
+  onAttr: (id: string, value: string) => void;
+}) {
+  const cls = code ? getAssetClass(code) : undefined;
+  return (
+    <div className="attr-section">
+      <div className="attr-head">
+        <span className="attr-title">Asset attributes</span>
+        <span className="attr-sub">optional</span>
+      </div>
+
+      {!cls ? (
+        <ClassCombo value={code || ''} onSelect={onSelect} />
+      ) : (
+        <>
+          <div className="attr-chosen">
+            <div className="attr-chosen-text">
+              <span className="attr-chosen-desc">{cls.description}</span>
+              <span className="attr-chosen-code mono">{cls.group} · {cls.code}</span>
+            </div>
+            <button type="button" className="link-btn" onClick={onClear} aria-label="Change asset class">
+              Change
+            </button>
+          </div>
+
+          {cls.attributes.length === 0 ? (
+            <p className="attr-none">No class attributes defined — details come from the photos and notes.</p>
+          ) : (
+            <div className="attr-grid">
+              {cls.attributes.map((a) => (
+                <label key={a.id} className="attr-field">
+                  <span className="attr-label">
+                    {a.label}
+                    {a.unit ? <span className="attr-unit"> ({a.unit})</span> : null}
+                  </span>
+                  <input
+                    className="loc-input"
+                    inputMode={a.dataType === 'NUMERIC' ? 'decimal' : 'text'}
+                    value={values[a.id] || ''}
+                    onChange={(e) => onAttr(a.id, e.target.value)}
+                    aria-label={a.label}
+                  />
+                </label>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// Type-to-search over the UniFormat A–G asset classes. Collapsed it shows a
+// prompt; tapping opens a filter box + result list. Filters by description or code.
+function ClassCombo({
+  value,
+  onSelect,
+}: {
+  value: string;
+  onSelect: (code: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const results = useMemo<AssetClass[]>(() => searchAssetClasses(query), [query]);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="building-trigger"
+        onClick={() => { setQuery(''); setOpen(true); }}
+        aria-label="Choose asset class"
+      >
+        <span className={value ? 'bt-val' : 'bt-ph'}>
+          {value ? (getAssetClass(value)?.description || value) : 'Search asset class…'}
+        </span>
+        <ChevronDownIcon />
+      </button>
+    );
+  }
+
+  return (
+    <div className="building-combo class-combo">
+      <input
+        autoFocus
+        className="loc-input"
+        placeholder="Type what the asset is — e.g. fire door, pump…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        aria-label="Search asset class"
+      />
+      <ul className="building-list" role="listbox" aria-label="Asset class results">
+        {results.map((c) => (
+          <li key={c.code}>
+            <button
+              type="button"
+              className={`building-opt ${c.code === value ? 'sel' : ''}`}
+              onClick={() => { onSelect(c.code); setOpen(false); }}
+            >
+              <span className="bn">{c.description}</span>
+              <span className="bc mono">{c.group} · {c.code}</span>
+            </button>
+          </li>
+        ))}
+        {results.length === 0 && <li className="building-empty">No match</li>}
+      </ul>
+      <button type="button" className="link-btn" onClick={() => setOpen(false)}>
         Cancel
       </button>
     </div>

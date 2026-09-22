@@ -170,7 +170,7 @@ async function main() {
   let q = sb
     .from('capture_packet')
     .select(
-      'id, captured_at, tech_name, scanned_asset_num, location_code, building, extraction_status, notes',
+      'id, captured_at, tech_name, scanned_asset_num, location_code, building, extraction_status, notes, asset_class, asset_class_desc, asset_attributes',
     )
     .order('captured_at', { ascending: false });
   if (!ALL) q = q.not('extraction_status', 'in', '("extracted","reviewed")');
@@ -367,6 +367,8 @@ function baseRow(p, ex) {
     asset_num: ex.asset_num ?? '',
     scanned_asset_num: p.scanned_asset_num || '',
     pmitem_id: ex.pmitem_id ?? '',
+    class_desc: p.asset_class_desc || '',
+    class_code: p.asset_class || '',
     description: ex.description ?? '',
     manufacturer: ex.manufacturer ?? '',
     model: ex.model ?? '',
@@ -379,9 +381,21 @@ function baseRow(p, ex) {
     readability: ex.readability ?? '',
     confidence: ex.confidence ?? '',
     error: ex.error || '',
-    // dynamic attribute columns are merged in later, keyed 'attr::<label>'
-    _attributes: ex.attributes && typeof ex.attributes === 'object' ? ex.attributes : {},
+    // dynamic attribute columns are merged in later, keyed 'attr::<label>'.
+    // AI-read specs plus any class attributes the tech typed in the field
+    // (prefixed "Class: " so they stay distinct from what the AI read).
+    _attributes: mergedAttributes(ex, p),
   };
+}
+
+// Combine AI-extracted attributes with the tech-entered class attributes.
+function mergedAttributes(ex, p) {
+  const merged = ex.attributes && typeof ex.attributes === 'object' ? { ...ex.attributes } : {};
+  const tech = p.asset_attributes && typeof p.asset_attributes === 'object' ? p.asset_attributes : {};
+  for (const [k, v] of Object.entries(tech)) {
+    if (v != null && String(v).trim() !== '') merged[`Class: ${k}`] = v;
+  }
+  return merged;
 }
 
 function componentRow(p, ex, c) {
@@ -413,6 +427,8 @@ const ASSET_COLUMNS = [
   { header: 'Asset #', key: 'asset_num', width: 12 },
   { header: 'Scanned asset #', key: 'scanned_asset_num', width: 14 },
   { header: 'PMItem ID', key: 'pmitem_id', width: 18 },
+  { header: 'Asset class (tech)', key: 'class_desc', width: 24 },
+  { header: 'Class code', key: 'class_code', width: 14 },
   { header: 'Description', key: 'description', width: 26 },
   { header: 'Manufacturer', key: 'manufacturer', width: 18 },
   { header: 'Model', key: 'model', width: 16 },

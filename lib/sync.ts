@@ -63,6 +63,12 @@ async function syncPacket(p: LocalPacket): Promise<void> {
     building: p.building ?? null,
     location_code: p.locationCode ?? null,
     tag_sharpness: p.tagSharpness ?? null,
+    asset_class: p.assetClass ?? null,
+    asset_class_desc: p.assetClassDesc ?? null,
+    asset_attributes:
+      p.assetAttributes && Object.keys(p.assetAttributes).length > 0
+        ? p.assetAttributes
+        : null,
     notes: p.notes || null,
   });
   if (pErr) throw new Error(`packet insert: ${pErr.message}`);

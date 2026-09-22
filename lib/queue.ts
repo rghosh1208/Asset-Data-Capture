@@ -29,6 +29,9 @@ export interface LocalPacket {
   locationCode?: string;     // assembled UCSF code, e.g. 2252-01-1C3
   tagSharpness?: number;     // focus metric of the tag photo (higher = sharper)
   noTag?: boolean;           // true = asset has no UCSF tag (captured by photos only)
+  assetClass?: string;       // UniFormat class code, e.g. C102110 (untagged flow)
+  assetClassDesc?: string;   // human description of the class, e.g. Fire Door
+  assetAttributes?: Record<string, string>; // class specs the tech filled in
   notes: string;
   status: SyncStatus;
   lastError?: string;
